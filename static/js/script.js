@@ -360,7 +360,7 @@
                 promptField.required = isCustom;
             }
         }
-        if (uploadExtra) uploadExtra.hidden = !isChecks;
+        if (uploadExtra) uploadExtra.style.display = isChecks ? 'block' : 'none';
 
         // Only checks mode takes a batch.
         fileInput.multiple = isChecks;
