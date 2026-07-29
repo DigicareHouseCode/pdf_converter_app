@@ -1,4 +1,6 @@
 import os
+from datetime import timedelta
+
 import pytesseract
 
 # Set Tesseract path
@@ -50,8 +52,8 @@ class Config:
     SQLALCHEMY_ECHO = False  # Set to True for SQL debugging
 
     # Google OAuth Configuration
-    GOOGLE_CLIENT_ID = "92902851975-7la0egcou73k05fv756d68ali4oou99g.apps.googleusercontent.com"
-    GOOGLE_CLIENT_SECRET = "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"
+    GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID', '')
+    GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET', '')
     GOOGLE_DISCOVERY_URL = "https://accounts.google.com/.well-known/openid-configuration"
     
     UPLOAD_FOLDER = 'uploads'
@@ -62,26 +64,34 @@ class Config:
     # Set GEMINI_API_KEY in your .env file (see .env.example)
     API_KEY = os.environ.get('GEMINI_API_KEY', "")
     
-    # Model Configuration (User can override this to 'gemini-2.5-pro' if available)
     GEMINI_MODEL_NAME = os.environ.get('GEMINI_MODEL_NAME', "gemini-2.5-pro")
 
-    # QuickBooks Configuration (Development Mode)
-    QUICKBOOKS_ENABLED = True
-    QUICKBOOKS_DEVELOPMENT_MODE = True
-    QUICKBOOKS_SANDBOX = True
+    # --- Extraction tuning -------------------------------------------------
+    # Rasterisation resolution for vision extraction. 300 DPI is the standard
+    # floor for OCR of financial documents; below ~200 the error rate on small
+    # digits climbs sharply.
+    EXTRACTION_DPI = int(os.environ.get('EXTRACTION_DPI', 300))
 
-    # Development credentials (not needed for mock service)
-    QUICKBOOKS_CONSUMER_KEY = "ABdjzWJDPUQaKr9DC8hDpl4RGewKDepQsgkimh77GgTh2U6nBD"
-    QUICKBOOKS_CONSUMER_SECRET = "CaLnrd3fbplzBH4gMOsoJYzznQNvl5tY7QQ0eX8N"
-    QUICKBOOKS_ACCESS_TOKEN = "eyJhbGciOiJkaXIiLCJlbmMiOiJBMTI4Q0JDLUhTMjU2IiwieC5vcmciOiJIMCJ9..kWPfwXPs7ioWacIHx1moWg.6J48H69cR2dAcdefsbOJILPcT0tnqCiveq4vUpI1ZWOsUvRzcddeQM3kyQMq3iYRjDQgJXDxURC2eVGO_cVBDHT_xRr9hC8ZjDU6s4C74EWgfk9unnk_LgQ9gMtTX1acpqiWhxCC3NYi4dcbkEWdFllq-LsfNlJ3dAvwhtxheKb15XmAOk1hpiSdM-oXADZ3tsXSVjkUi_MpSGWSfHIy-HsoUowlPIzefuOgzy86rk-ipykjAUkgRXRapAt9VX06Zs-hVBDWQ-yMW6htcfvlQS6B0gHbN-yXcGzhxJoNu9LJkoTe_O-yDrO_CmgG9cFpYPTBWRZ0sutEhsTvnAX7qUprtVAFZvzJwPRF9GTMMrEw9DAB3nK5M92nyp1MQHRc9nkRV-8K6MLy_HSZ0Wq_P02q-21aw8LPWir-A5tRXyOTBIfOfc--lgrkHfyDodWTpclEI3PtlLGz0pJEDz0xHBRT0vn719Vkb5f-DGeO8o3x6NZFM0A2KgS3pMUcF3ILZpxC9edCryhrJY5AV7Op7v6eZWXw6cv8ag8oIKFDyYBsR79811lDDqodMHJoex57rlWiV-MDgIJ1fGhVMFbM5CwnSmVV5LvOhjK221Avl9BdcjG4667rKxLkaXVk8XKq.wDUQnASdCu4SVZlBjoHKKw"
-    QUICKBOOKS_ACCESS_TOKEN_SECRET = "RT1-246-H0-1771175113ru1ax6zsyzzbx5d0gqp3"
-    QUICKBOOKS_COMPANY_ID = "9341455649885282"
+    # Deterministic output. Extraction is a transcription task, not a creative
+    # one, so there is no reason to sample.
+    GEMINI_TEMPERATURE = float(os.environ.get('GEMINI_TEMPERATURE', 0.0))
+    GEMINI_MAX_OUTPUT_TOKENS = int(os.environ.get('GEMINI_MAX_OUTPUT_TOKENS', 8192))
 
-    # QuickBooks OAuth 2.0 Configuration
-    QB_CLIENT_ID = "ABdjzWJDPUQaKr9DC8hDpl4RGewKDepQsgkimh77GgTh2U6nBD"
-    QB_CLIENT_SECRET = "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"
-    QB_REDIRECT_URI = "http://localhost:5000/quickbooks/callback"
-    QB_ENVIRONMENT = "sandbox"  # or "production"
+    # Pages processed concurrently. Raise only if your Gemini quota allows.
+    EXTRACTION_WORKERS = int(os.environ.get('EXTRACTION_WORKERS', 3))
+
+    # Cost ceiling: every page is one vision call, so an unbounded document can
+    # cost more than the subscription. Applies to Pro users too.
+    MAX_PAGES_PER_CONVERSION = int(os.environ.get('MAX_PAGES_PER_CONVERSION', 200))
+
+    # Converted workbooks are deleted after this many hours.
+    OUTPUT_RETENTION_HOURS = int(os.environ.get('OUTPUT_RETENTION_HOURS', 48))
+
+    # --- Session hardening -------------------------------------------------
+    SESSION_COOKIE_HTTPONLY = True
+    SESSION_COOKIE_SAMESITE = 'Lax'
+    SESSION_COOKIE_SECURE = os.environ.get('FLASK_DEBUG', 'False').lower() != 'true'
+    PERMANENT_SESSION_LIFETIME = timedelta(days=14)
 
     # Payment Configuration
     STRIPE_PUBLIC_KEY = os.environ.get('STRIPE_PUBLIC_KEY', 'pk_test_placeholder')

@@ -18,6 +18,7 @@ instance/
 # Runtime data
 uploads/
 outputs/
+checks/
 quickbooks_companies/
 
 # Debug / scratch artifacts

@@ -696,6 +696,71 @@ textarea { resize: vertical; min-height: 110px; line-height: 1.55; }
 .action-buttons { display: flex; gap: var(--s3); flex-wrap: wrap; }
 .action-buttons .btn { flex: 1 1 180px; }
 
+/* ---------- review table ---------- */
+
+.review-head {
+    display: flex;
+    align-items: center;
+    gap: var(--s3);
+    flex-wrap: wrap;
+    padding: var(--s4) var(--s5);
+    border-bottom: 1px solid var(--border);
+}
+.save-state { font-size: var(--fs-xs); color: var(--text-3); }
+.save-state[data-state="saved"] { color: var(--success); }
+.save-state[data-state="error"] { color: var(--danger); }
+
+.review-empty { padding: var(--s6) var(--s5); color: var(--text-3); font-size: var(--fs-sm); }
+
+.table-scroll { overflow-x: auto; max-height: 70vh; overflow-y: auto; }
+
+.data-table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+.data-table th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    text-align: left;
+    padding: var(--s2) var(--s3);
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--border);
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-3);
+    white-space: nowrap;
+}
+.data-table td {
+    padding: 0;
+    border-bottom: 1px solid var(--rule, var(--border));
+    vertical-align: top;
+}
+.data-table tbody tr:hover td { background: var(--surface-2); }
+.data-table tr.is-flagged td { background: var(--danger-soft); }
+.data-table tr.is-flagged:hover td { background: var(--danger-soft); }
+
+.data-table .col-n { width: 4ch; }
+.data-table .col-money { width: 12ch; text-align: right; }
+
+.cell {
+    display: block;
+    width: 100%;
+    min-height: 34px;
+    padding: var(--s2) var(--s3);
+    border: 1px solid transparent;
+    background: transparent;
+    font: inherit;
+    color: inherit;
+    border-radius: var(--radius-sm);
+}
+.cell:hover { border-color: var(--border); }
+.cell:focus { outline: none; border-color: var(--accent); box-shadow: var(--ring); background: var(--surface); }
+.cell--num { font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: right; }
+.cell--index { color: var(--text-3); font-family: var(--mono); font-size: var(--fs-xs); padding: var(--s2) var(--s3); }
+.cell--note { color: var(--danger); font-size: var(--fs-xs); padding: var(--s2) var(--s3); display: block; }
+
+.row-dirty .cell { background: var(--warning-soft); }
+
 /* ---------- pricing / cart ---------- */
 
 .split { display: grid; grid-template-columns: 1fr 320px; gap: var(--s5); align-items: start; }

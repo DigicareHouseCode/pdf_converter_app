@@ -1,73 +1,98 @@
-from flask import Flask, render_template, request, send_file, flash, redirect, url_for, session, jsonify
-from flask_login import LoginManager, login_user, logout_user, login_required, current_user
+import logging
 import os
-import uuid
-import time
-from datetime import datetime, timedelta
-from dotenv import load_dotenv
-from werkzeug.middleware.proxy_fix import ProxyFix
-import stripe
-import requests
-from requests.auth import HTTPBasicAuth
-
-# Load environment variables from .env file
-load_dotenv()
-from werkzeug.utils import secure_filename
-from config import Config
-from models import db, User, ConversionHistory, TaskProgress
-from auth import auth_bp
-from converters.scanned_pdf_converter import extract_data_with_gemini_full
-from converters.general_pdf_converter import convert_pdf_to_excel
-from converters.selectable_pdf_converter import extract_pdf_to_excel
-from converters.custom_pdf_converter import extract_custom_pdf_to_excel
 import threading
-from concurrent.futures import ThreadPoolExecutor
+import time
+import uuid
+from datetime import datetime, timedelta
 
-# In-memory tasks dictionary removed in favor of Database-backed TaskProgress
+import requests
+import stripe
+from dotenv import load_dotenv
+from flask import (Flask, abort, flash, jsonify, redirect, render_template,
+                   request, send_file, url_for)
+from flask_login import (LoginManager, current_user, login_required, login_user,
+                         logout_user)
+from flask_wtf.csrf import CSRFProtect
+from requests.auth import HTTPBasicAuth
+from werkzeug.middleware.proxy_fix import ProxyFix
+from werkzeug.utils import secure_filename
 
-def update_task_progress(task_id, progress, message):
-    """Callback function to update task progress in DB"""
-    with app.app_context():
-        try:
-            task = TaskProgress.query.get(task_id)
-            if task:
-                task.progress = progress
-                task.message = message
-                db.session.commit()
-        except Exception as e:
-            print(f"[ERROR] Failed to update task progress: {e}")
-            db.session.rollback()
+load_dotenv()
+
+from auth import auth_bp
+from config import Config
+from models import ConversionHistory, TaskProgress, User, db
+
+# --------------------------------------------------------------- logging ---
+
+logging.basicConfig(
+    level=os.environ.get('LOG_LEVEL', 'INFO').upper(),
+    format='%(asctime)s %(levelname)-7s [%(name)s] %(message)s',
+)
+log = logging.getLogger('pdf_converter')
+
+# ------------------------------------------------------------------ app ----
 
 app = Flask(__name__)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 app.config.from_object(Config)
-app.config['MAX_CONTENT_LENGTH'] = 1024 * 1024 * 1024  # 1GB limit
+app.config['MAX_CONTENT_LENGTH'] = 1024 * 1024 * 1024  # 1 GB
 
-# Initialize database
+if not app.config.get('SECRET_KEY'):
+    raise RuntimeError("SECRET_KEY is not set. Add it to your .env file.")
+
 db.init_app(app)
-
-# Stripe API Key
 stripe.api_key = app.config['STRIPE_SECRET_KEY']
 
-# Initialize Flask-Login
+csrf = CSRFProtect(app)
+
+# Rate limiting. Falls back to in-memory storage when no Redis URL is set,
+# which is per-worker rather than global but still blunts credential stuffing.
+try:
+    from flask_limiter import Limiter
+    from flask_limiter.util import get_remote_address
+
+    limiter = Limiter(
+        get_remote_address,
+        app=app,
+        storage_uri=os.environ.get('RATELIMIT_STORAGE_URI', 'memory://'),
+        default_limits=[],
+    )
+except ImportError:  # pragma: no cover
+    limiter = None
+    log.warning("flask-limiter is not installed; auth routes are unthrottled.")
+
+
+def rate_limit(rule):
+    """Apply a limit only when the extension is available."""
+    def decorator(fn):
+        return limiter.limit(rule)(fn) if limiter else fn
+    return decorator
+
+
 login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
-login_manager.login_message = 'Please log in to access this page'
+login_manager.login_message = 'Please log in to continue.'
 login_manager.login_message_category = 'error'
+login_manager.session_protection = 'strong'
 
-# Register auth blueprint
 app.register_blueprint(auth_bp, url_prefix='/auth')
+
 
 @login_manager.user_loader
 def load_user(user_id):
-    user = User.query.get(int(user_id))
-    if user and user.is_pro and user.pro_expiry:
-        if datetime.utcnow() > user.pro_expiry:
-            user.is_pro = False
-            db.session.commit()
-            print(f"[INFO] User {user.username} Pro status expired.")
+    user = db.session.get(User, int(user_id))
+    if user and user.is_pro and user.pro_expiry and datetime.utcnow() > user.pro_expiry:
+        user.is_pro = False
+        db.session.commit()
+        log.info("Pro subscription expired for user %s", user.id)
     return user
+
+
+@app.context_processor
+def inject_globals():
+    return {'now': datetime.utcnow()}
 
 
 def allowed_file(filename):
@@ -79,34 +104,41 @@ def ensure_directories():
     os.makedirs(app.config['OUTPUT_FOLDER'], exist_ok=True)
 
 
-# Note: login_required is now imported from flask_login
-# The @login_required decorator will automatically redirect to login page
+def update_task_progress(task_id, progress, message):
+    with app.app_context():
+        try:
+            task = db.session.get(TaskProgress, task_id)
+            if task:
+                task.progress = int(progress)
+                task.message = message[:255]
+                db.session.commit()
+        except Exception:
+            log.exception("Could not update progress for task %s", task_id)
+            db.session.rollback()
 
 
-"""
-def get_quickbooks_oauth():
-    return QuickBooksOAuth(
-        client_id=app.config['QB_CLIENT_ID'],
-        client_secret=app.config['QB_CLIENT_SECRET'],
-        redirect_uri=app.config['QB_REDIRECT_URI'],
-        environment=app.config['QB_ENVIRONMENT']
-    )
+def owned_task_or_404(task_id):
+    """
+    Fetch a task, or abort, unless it belongs to the current user.
+
+    These routes previously had no ownership check at all, so any user could
+    read another user's conversion — and their bank statements — by guessing
+    a task id or an output filename.
+    """
+    task = db.session.get(TaskProgress, task_id)
+    if task is None:
+        abort(404)
+    if task.user_id is not None and task.user_id != current_user.id:
+        log.warning("User %s attempted to access task %s owned by %s",
+                    current_user.id, task_id, task.user_id)
+        abort(404)
+    return task
 
 
-def is_token_expired():
-    # Check if token is expired or about to expire (within 5 minutes)
-    expires_at = session.get('qb_token_expires_at', 0)
-    buffer_time = 300  # 5 minutes buffer
-    return time.time() > (expires_at - buffer_time)
-"""
-
-
-@app.route('/landing')
-def landing():
-    return render_template('landing.html', is_landing=True)
-
+# ---------------------------------------------------------------- pages ----
 
 @app.route('/')
+@app.route('/landing')
 def index():
     return render_template('landing.html', is_landing=True)
 
@@ -114,87 +146,162 @@ def index():
 @app.route('/app')
 @login_required
 def dashboard():
-    # Count successful conversions for the current user
-    conversion_count = ConversionHistory.query.filter_by(user_id=current_user.id, success=True).count()
-    limit = app.config.get('FREE_CONVERSION_LIMIT', 3)
-    return render_template('index.html', 
-                             conversion_count=conversion_count, 
-                             conversion_limit=limit,
-                             is_pro=current_user.is_pro,
-                             pro_expiry=current_user.pro_expiry)
+    conversion_count = ConversionHistory.query.filter_by(
+        user_id=current_user.id, success=True).count()
+    return render_template(
+        'index.html',
+        conversion_count=conversion_count,
+        conversion_limit=app.config.get('FREE_CONVERSION_LIMIT', 3),
+        free_page_limit=app.config.get('FREE_PAGE_LIMIT', 5),
+        is_pro=current_user.is_pro,
+        pro_expiry=current_user.pro_expiry,
+    )
 
+
+# ----------------------------------------------------------------- auth ----
+
+@app.route('/login', methods=['GET', 'POST'])
+@rate_limit("10 per minute; 40 per hour")
+def login():
+    if current_user.is_authenticated:
+        return redirect(url_for('dashboard'))
+
+    if request.method == 'POST':
+        username = (request.form.get('username') or '').strip()
+        password = request.form.get('password') or ''
+        user = User.query.filter_by(username=username).first()
+
+        if user and user.check_password(password):
+            if not user.is_active:
+                flash('That account has been deactivated.', 'error')
+                return render_template('login.html')
+
+            user.last_login = datetime.utcnow()
+            db.session.commit()
+            login_user(user, remember=bool(request.form.get('remember')))
+            log.info("Login succeeded for user %s", user.id)
+            return redirect(url_for('dashboard'))
+
+        # Identical message either way — never reveal which half was wrong.
+        log.info("Login failed for username %r", username[:64])
+        flash('That username and password do not match.', 'error')
+
+    return render_template('login.html')
+
+
+@app.route('/signup', methods=['GET', 'POST'])
+@rate_limit("5 per minute; 20 per hour")
+def signup():
+    if current_user.is_authenticated:
+        return redirect(url_for('dashboard'))
+
+    if request.method == 'POST':
+        username = (request.form.get('username') or '').strip()
+        email = (request.form.get('email') or '').strip().lower()
+        password = request.form.get('password') or ''
+
+        if len(username) < 3:
+            flash('Pick a username of at least 3 characters.', 'error')
+            return render_template('signup.html')
+        if len(password) < 8:
+            flash('Use a password of at least 8 characters.', 'error')
+            return render_template('signup.html')
+        if User.query.filter_by(username=username).first():
+            flash('That username is taken. Try another.', 'error')
+            return render_template('signup.html')
+        if email and User.query.filter_by(email=email).first():
+            flash('That email is already registered. Log in instead.', 'error')
+            return render_template('signup.html')
+
+        user = User(username=username, email=email)
+        user.set_password(password)
+        try:
+            db.session.add(user)
+            db.session.commit()
+            login_user(user, remember=True)
+            log.info("Account created: user %s", user.id)
+            flash('Welcome aboard.', 'success')
+            return redirect(url_for('dashboard'))
+        except Exception:
+            db.session.rollback()
+            log.exception("Signup failed")
+            flash('Could not create the account. Try again.', 'error')
+
+    return render_template('signup.html')
+
+
+@app.route('/logout')
+@login_required
+def logout():
+    logout_user()
+    flash('You have been logged out.', 'success')
+    return redirect(url_for('login'))
+
+
+# -------------------------------------------------------------- payments ---
 
 @app.route('/cart')
 @login_required
 def cart():
     if current_user.is_pro:
-        flash("You are already a Pro user!", "info")
+        flash('You are already on the Professional plan.', 'info')
         return redirect(url_for('dashboard'))
-    
-    session['payment_notified'] = False
-    return render_template('cart.html', 
-                         price=app.config['PRO_PLAN_PRICE'],
-                         paypal_client_id=app.config['PAYPAL_CLIENT_ID'])
+    return render_template('cart.html',
+                           price=app.config['PRO_PLAN_PRICE'],
+                           paypal_client_id=app.config['PAYPAL_CLIENT_ID'])
 
 
 @app.route('/create-checkout-session')
 @login_required
 def create_checkout_session():
     try:
-        checkout_session = stripe.checkout.Session.create(
+        checkout = stripe.checkout.Session.create(
             payment_method_types=['card'],
-            line_items=[
-                {
-                    'price_data': {
-                        'currency': 'usd',
-                        'product_data': {
-                            'name': 'Professional Plan - PDF Converter',
-                            'description': 'Unlimited conversions and advanced features',
-                        },
-                        'unit_amount': int(app.config['PRO_PLAN_PRICE'] * 100),
+            line_items=[{
+                'price_data': {
+                    'currency': 'usd',
+                    'product_data': {
+                        'name': 'Professional Plan - PDF Converter',
+                        'description': 'Unlimited conversions and advanced features',
                     },
-                    'quantity': 1,
+                    'unit_amount': int(app.config['PRO_PLAN_PRICE'] * 100),
                 },
-            ],
+                'quantity': 1,
+            }],
             mode='payment',
-            success_url=url_for('payment_success', success='true', _external=True),
+            success_url=url_for('payment_success', session_id='{CHECKOUT_SESSION_ID}', _external=True),
             cancel_url=url_for('cart', _external=True),
             client_reference_id=str(current_user.id),
             customer_email=current_user.email,
         )
-        return redirect(checkout_session.url, code=303)
-    except Exception as e:
-        flash(f"Error creating checkout session: {str(e)}", "error")
+        return redirect(checkout.url, code=303)
+    except Exception:
+        log.exception("Stripe checkout session failed")
+        flash('Could not start checkout. Try again in a moment.', 'error')
         return redirect(url_for('cart'))
 
 
 @app.route('/stripe-webhook', methods=['POST'])
+@csrf.exempt  # signed by Stripe, verified below
 def stripe_webhook():
     payload = request.get_data()
-    sig_header = request.environ.get('HTTP_STRIPE_SIGNATURE')
-    endpoint_secret = os.environ.get('STRIPE_WEBHOOK_SECRET')
-
-    event = None
+    signature = request.headers.get('Stripe-Signature')
+    secret = os.environ.get('STRIPE_WEBHOOK_SECRET')
 
     try:
-        event = stripe.Webhook.construct_event(
-            payload, sig_header, endpoint_secret
-        )
-    except ValueError as e:
-        # Invalid payload
+        event = stripe.Webhook.construct_event(payload, signature, secret)
+    except ValueError:
         return 'Invalid payload', 400
-    except stripe.error.SignatureVerificationError as e:
-        # Invalid signature
+    except stripe.error.SignatureVerificationError:
+        log.warning("Stripe webhook with a bad signature was rejected")
         return 'Invalid signature', 400
 
-    # Handle the checkout.session.completed event
     if event['type'] == 'checkout.session.completed':
-        session = event['data']['object']
-        
-        # Fulfill the purchase...
-        user_id = session.get('client_reference_id')
-        if user_id:
-            upgrade_user_to_pro(user_id)
+        checkout = event['data']['object']
+        if checkout.get('payment_status') == 'paid':
+            user_id = checkout.get('client_reference_id')
+            if user_id:
+                upgrade_user_to_pro(user_id)
 
     return 'Success', 200
 
@@ -202,820 +309,525 @@ def stripe_webhook():
 @app.route('/paypal/create-order', methods=['POST'])
 @login_required
 def create_paypal_order():
+    base = ("https://api-m.sandbox.paypal.com" if app.config['PAYPAL_MODE'] == 'sandbox'
+            else "https://api-m.paypal.com")
     auth = HTTPBasicAuth(app.config['PAYPAL_CLIENT_ID'], app.config['PAYPAL_SECRET'])
-    
-    # Get access token
-    base_url = "https://api-m.sandbox.paypal.com" if app.config['PAYPAL_MODE'] == 'sandbox' else "https://api-m.paypal.com"
-    
-    token_response = requests.post(
-        f"{base_url}/v1/oauth2/token",
-        auth=auth,
-        data={'grant_type': 'client_credentials'}
-    )
-    
+
+    token_response = requests.post(f"{base}/v1/oauth2/token", auth=auth,
+                                   data={'grant_type': 'client_credentials'}, timeout=30)
     if token_response.status_code != 200:
-        return jsonify({'error': 'Failed to get PayPal token'}), 500
-        
-    access_token = token_response.json().get('access_token')
-    
-    order_data = {
-        "intent": "CAPTURE",
-        "purchase_units": [{
-            "amount": {
-                "currency_code": "USD",
-                "value": str(app.config['PRO_PLAN_PRICE'])
-            },
-            "description": "Professional Plan - PDF Converter"
-        }],
-        "application_context": {
-            "return_url": url_for('payment_success', _external=True),
-            "cancel_url": url_for('cart', _external=True)
-        }
-    }
-    
-    order_response = requests.post(
-        f"{base_url}/v2/checkout/orders",
-        headers={
-            'Authorization': f'Bearer {access_token}',
-            'Content-Type': 'application/json'
+        log.error("PayPal token request failed: %s", token_response.status_code)
+        return jsonify({'error': 'Could not reach PayPal'}), 502
+
+    order = requests.post(
+        f"{base}/v2/checkout/orders",
+        headers={'Authorization': f"Bearer {token_response.json().get('access_token')}",
+                 'Content-Type': 'application/json'},
+        json={
+            "intent": "CAPTURE",
+            "purchase_units": [{
+                "amount": {"currency_code": "USD", "value": f"{app.config['PRO_PLAN_PRICE']:.2f}"},
+                "description": "Professional Plan - PDF Converter",
+                "custom_id": str(current_user.id),
+            }],
         },
-        json=order_data
+        timeout=30,
     )
-    
-    return jsonify(order_response.json())
+    return jsonify(order.json())
 
 
 @app.route('/paypal/capture-order', methods=['POST'])
 @login_required
 def capture_paypal_order():
-    order_id = request.json.get('orderID')
-    
+    order_id = (request.json or {}).get('orderID')
+    if not order_id:
+        return jsonify({'error': 'Missing order id'}), 400
+
+    base = ("https://api-m.sandbox.paypal.com" if app.config['PAYPAL_MODE'] == 'sandbox'
+            else "https://api-m.paypal.com")
     auth = HTTPBasicAuth(app.config['PAYPAL_CLIENT_ID'], app.config['PAYPAL_SECRET'])
-    base_url = "https://api-m.sandbox.paypal.com" if app.config['PAYPAL_MODE'] == 'sandbox' else "https://api-m.paypal.com"
-    
-    # Get access token
-    token_response = requests.post(
-        f"{base_url}/v1/oauth2/token",
-        auth=auth,
-        data={'grant_type': 'client_credentials'}
+
+    token_response = requests.post(f"{base}/v1/oauth2/token", auth=auth,
+                                   data={'grant_type': 'client_credentials'}, timeout=30)
+    if token_response.status_code != 200:
+        return jsonify({'error': 'Could not reach PayPal'}), 502
+
+    capture = requests.post(
+        f"{base}/v2/checkout/orders/{order_id}/capture",
+        headers={'Authorization': f"Bearer {token_response.json().get('access_token')}",
+                 'Content-Type': 'application/json'},
+        timeout=30,
     )
-    access_token = token_response.json().get('access_token')
-    
-    capture_response = requests.post(
-        f"{base_url}/v2/checkout/orders/{order_id}/capture",
-        headers={
-            'Authorization': f'Bearer {access_token}',
-            'Content-Type': 'application/json'
-        }
-    )
-    
-    data = capture_response.json()
+    data = capture.json()
+
+    # Trust PayPal's own report of the capture, not the browser's.
     if data.get('status') == 'COMPLETED':
         upgrade_user_to_pro(current_user.id)
-        
+        log.info("PayPal capture completed for user %s", current_user.id)
+
     return jsonify(data)
 
 
 @app.route('/payment-success')
 @login_required
 def payment_success():
-    # The actual upgrade happens securely via Stripe Webhooks or PayPal Capture API.
-    # We refresh the current user state to see if the background process finished.
+    """
+    Confirmation page.
+
+    The upgrade itself happens in the Stripe webhook or the PayPal capture.
+    This route used to upgrade the account whenever it saw ?success=true in
+    the query string, which meant any logged-in user could grant themselves a
+    subscription by visiting the URL. It now verifies with Stripe directly.
+    """
     user = db.session.get(User, current_user.id)
     db.session.refresh(user)
-    
-    # If the user is already pro, show the success page immediately
-    if user.is_pro:
-        if not session.get('payment_notified'):
-            flash("Success! Your account has been upgraded to Pro.", "success")
-            session['payment_notified'] = True
-        return render_template('payment_success.html')
-    
-    # If they just came from a successful checkout but the webhook hasn't fired yet
-    if request.args.get('success') == 'true':
-        # Final safety check: If they are on this URL with the success flag, 
-        # it means the frontend confirmed the payment. We can do a final manual upgrade
-        # here as a fallback to the webhook/capture.
-        upgrade_user_to_pro(current_user.id)
-        flash("Success! Your account has been upgraded to Pro.", "success")
-        return render_template('payment_success.html')
 
-    # If someone tries to access this URL directly without paying
-    flash("Your payment is being processed or was not found. Please check your dashboard.", "info")
-    return redirect(url_for('dashboard'))
+    if not user.is_pro:
+        checkout_id = request.args.get('session_id')
+        if checkout_id:
+            try:
+                checkout = stripe.checkout.Session.retrieve(checkout_id)
+                paid = checkout.get('payment_status') == 'paid'
+                belongs = str(checkout.get('client_reference_id')) == str(user.id)
+                if paid and belongs:
+                    upgrade_user_to_pro(user.id)
+                    db.session.refresh(user)
+                else:
+                    log.warning("payment-success for unpaid or mismatched session %s", checkout_id)
+            except Exception:
+                log.exception("Could not verify Stripe session %s", checkout_id)
+
+    if not user.is_pro:
+        flash('We have not received confirmation of your payment yet. '
+              'If you have been charged, it will appear here shortly.', 'info')
+        return redirect(url_for('dashboard'))
+
+    return render_template('payment_success.html')
 
 
 def upgrade_user_to_pro(user_id):
-    """Helper function to upgrade a user to pro status"""
-    with app.app_context():
-        try:
-            user = User.query.get(int(user_id))
-            if user:
-                user.is_pro = True
-                user.pro_expiry = datetime.utcnow() + timedelta(days=30)
-                db.session.commit()
-                print(f"[INFO] User {user.username} (ID: {user_id}) upgraded to PRO. Expiring on {user.pro_expiry}")
-                return True
-        except Exception as e:
-            print(f"[ERROR] Failed to upgrade user {user_id}: {e}")
-            db.session.rollback()
-    return False
+    try:
+        user = db.session.get(User, int(user_id))
+        if not user:
+            return False
+        user.is_pro = True
+        base = max(user.pro_expiry or datetime.utcnow(), datetime.utcnow())
+        user.pro_expiry = base + timedelta(days=30)
+        db.session.commit()
+        log.info("User %s upgraded to Pro until %s", user_id, user.pro_expiry)
+        return True
+    except Exception:
+        log.exception("Could not upgrade user %s", user_id)
+        db.session.rollback()
+        return False
 
 
-@app.route('/login', methods=['GET', 'POST'])
-def login():
-    # If already logged in, redirect to dashboard
-    if current_user.is_authenticated:
-        return redirect(url_for('dashboard'))
-
-    if request.method == 'POST':
-        username = request.form.get('username')
-        password = request.form.get('password')
-
-        # Query user from database
-        user = User.query.filter_by(username=username).first()
-        
-        if user and user.check_password(password):
-            if not user.is_active:
-                flash('Account is deactivated', 'error')
-                return render_template('login.html')
-            
-            # Update last login time
-            user.last_login = datetime.utcnow()
-            db.session.commit()
-            
-            # Capture 'Remember Me' preference
-            remember = True if request.form.get('remember') else False
-            
-            # Login the user
-            login_user(user, remember=remember)
-            flash('Login successful!', 'success')
-            return redirect(url_for('dashboard'))
-        else:
-            flash('Invalid username or password', 'error')
-
-    return render_template('login.html')
-
-
-@app.route('/logout')
-@login_required
-def logout():
-    logout_user()
-    flash('You have been logged out', 'success')
-    return redirect(url_for('login'))
-
-
-@app.route('/signup', methods=['GET', 'POST'])
-def signup():
-    # If already logged in, redirect to dashboard
-    if current_user.is_authenticated:
-        return redirect(url_for('dashboard'))
-    
-    if request.method == 'POST':
-        username = request.form.get('username')
-        email = request.form.get('email')
-        password = request.form.get('password')
-        
-        # Check if username or email already exists
-        if User.query.filter_by(username=username).first():
-            flash('Username already taken. Please choose another one.', 'error')
-            return render_template('signup.html')
-            
-        if User.query.filter_by(email=email).first():
-            flash('Email already registered. Please login instead.', 'error')
-            return render_template('signup.html')
-            
-        # Create new user
-        new_user = User(username=username, email=email)
-        new_user.set_password(password)
-        
-        try:
-            db.session.add(new_user)
-            db.session.commit()
-            
-            # Log the user in automatically
-            login_user(new_user, remember=True)
-            flash('Account created successfully! Welcome aboard.', 'success')
-            return redirect(url_for('dashboard'))
-        except Exception as e:
-            db.session.rollback()
-            flash(f'An error occurred: {str(e)}', 'error')
-            
-    return render_template('signup.html')
-
+# --------------------------------------------------------------- convert ---
 
 @app.route('/upload', methods=['GET', 'POST'])
 @login_required
+@rate_limit("20 per hour")
 def upload_file():
     if request.method == 'GET':
         return redirect(url_for('dashboard'))
-        
-    # Check conversion limit before processing
-    conversion_count = ConversionHistory.query.filter_by(user_id=current_user.id, success=True).count()
+
+    def fail(message):
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return jsonify({'error': message}), 400
+        flash(message, 'error')
+        return redirect(url_for('dashboard'))
+
+    conversion_count = ConversionHistory.query.filter_by(
+        user_id=current_user.id, success=True).count()
     limit = app.config.get('FREE_CONVERSION_LIMIT', 3)
-    
+
     if not current_user.is_pro and conversion_count >= limit:
-        flash(f'You have reached your limit of {limit} free conversions. Please contact support to upgrade your account.', 'error')
-        return redirect(url_for('dashboard'))
+        return fail(f'You have used all {limit} free conversions. Upgrade to continue.')
 
-    if 'file' not in request.files:
-        flash('No file selected', 'error')
-        return redirect(url_for('dashboard'))
+    file = request.files.get('file')
+    if not file or not file.filename:
+        return fail('Choose a PDF file to convert.')
+    if not allowed_file(file.filename):
+        return fail('Only PDF files can be converted.')
 
-    file = request.files['file']
     conversion_type = request.form.get('conversion_type')
-    custom_prompt = request.form.get('custom_prompt', '')
-    
-    # Generate unique task ID
-    task_id = str(uuid.uuid4())
-    
-    # Create TaskProgress entry in DB
-    new_task = TaskProgress(
-        id=task_id,
-        status='processing',
-        progress=0,
-        message='Initializing...'
-    )
-    db.session.add(new_task)
-    db.session.commit()
+    if conversion_type not in {'scanned', 'selectable', 'general', 'custom'}:
+        return fail('Pick a conversion mode.')
 
-    # Feature Gating: Check if conversion type is PRO only
     pro_types = app.config.get('PRO_CONVERSION_TYPES', set())
     if conversion_type in pro_types and not current_user.is_pro:
-        flash(f'The {conversion_type.title()} conversion is a PRO feature. Please upgrade your account.', 'error')
-        return redirect(url_for('dashboard'))
+        return fail(f'{conversion_type.title()} mode is part of the Professional plan.')
 
-    # Page Limit: Determine max pages based on user tier
+    custom_prompt = (request.form.get('custom_prompt') or '').strip()
+    if conversion_type == 'custom' and not custom_prompt:
+        return fail('Describe what you want extracted.')
+
+    ensure_directories()
+
+    file_id = str(uuid.uuid4())
+    original_filename = secure_filename(file.filename) or 'document.pdf'
+    upload_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{file_id}_{original_filename}")
+    output_filename = f"{file_id}_{os.path.splitext(original_filename)[0]}.xlsx"
+    output_path = os.path.join(app.config['OUTPUT_FOLDER'], output_filename)
+
+    file.save(upload_path)
+
     max_pages = None if current_user.is_pro else app.config.get('FREE_PAGE_LIMIT', 5)
 
-    if file.filename == '':
-        flash('No file selected', 'error')
-        return redirect(url_for('dashboard'))
+    if not current_user.is_pro:
+        try:
+            import pdfplumber
+            with pdfplumber.open(upload_path) as pdf:
+                pages = len(pdf.pages)
+            if pages > max_pages:
+                os.remove(upload_path)
+                return fail(
+                    f'The free plan reads up to {max_pages} pages. This file has {pages}. '
+                    f'Upgrade for unlimited pages.'
+                )
+        except Exception:
+            log.warning("Could not count pages in %s; converter will apply the limit.", original_filename)
 
-    if file and allowed_file(file.filename):
-        ensure_directories()
+    task_id = str(uuid.uuid4())
+    db.session.add(TaskProgress(
+        id=task_id,
+        user_id=current_user.id,
+        original_filename=original_filename,
+        status='processing',
+        progress=0,
+        message='Starting…',
+    ))
+    db.session.commit()
 
-        # Generate unique filenames
-        file_id = str(uuid.uuid4())
-        original_filename = secure_filename(file.filename)
+    thread = threading.Thread(
+        target=run_conversion,
+        args=(task_id, current_user.id, original_filename, upload_path,
+              output_path, conversion_type, custom_prompt, max_pages),
+        daemon=True,
+    )
+    thread.start()
 
-        # Create consistent filenames
-        upload_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{file_id}_{original_filename}")
-        output_filename = f"{file_id}_{original_filename}.xlsx"
-        output_path = os.path.join(app.config['OUTPUT_FOLDER'], output_filename)
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        return jsonify({'task_id': task_id, 'status': 'processing'})
+    return render_template('processing.html', task_id=task_id)
 
-        print(f"[UPLOAD] Upload path: {upload_path}")
-        print(f"[OUTPUT] Output path: {output_path}")
 
-        # Save uploaded file
-        file.save(upload_path)
+def run_conversion(task_id, user_id, original_filename, upload_path,
+                   output_path, conversion_type, custom_prompt, max_pages):
+    with app.app_context():
+        from converters.pipeline import convert, convert_custom
 
-        # Check page count for free users
-        if not current_user.is_pro:
-            try:
-                import pdfplumber
-                with pdfplumber.open(upload_path) as pdf:
-                    page_count = len(pdf.pages)
-                    if page_count > app.config.get('FREE_PAGE_LIMIT', 5):
-                        os.remove(upload_path)
-                        flash(f'Free plan users are limited to PDFs with up to {app.config.get("FREE_PAGE_LIMIT", 5)} pages. Your file has {page_count} pages. Please upgrade to Pro for unlimited pages.', 'error')
-                        return redirect(url_for('dashboard'))
-            except Exception as e:
-                print(f"[ERROR] Failed to check page count: {e}")
-                # If we can't check, we let it pass but the converter will still respect the limit
+        success, message, summary = False, 'Conversion failed.', None
+        started = time.time()
 
-        # Function to run conversion in background
-        def run_conversion(task_id, user_id, original_filename, upload_path, output_path, conversion_type, custom_prompt, max_pages):
-            with app.app_context():
+        def progress(percent, note):
+            update_task_progress(task_id, percent, note)
+
+        try:
+            log.info("[%s] %s mode, file=%s", task_id[:8], conversion_type, original_filename)
+            if conversion_type == 'custom':
+                success, message, summary = convert_custom(
+                    upload_path, output_path, app.config['API_KEY'], custom_prompt,
+                    max_pages=max_pages, progress_callback=progress)
+            else:
+                success, message, summary = convert(
+                    upload_path, output_path, app.config['API_KEY'],
+                    mode=conversion_type, max_pages=max_pages, progress_callback=progress)
+        except Exception as exc:
+            log.exception("[%s] conversion crashed", task_id[:8])
+            message = f'The conversion failed: {exc}'
+
+        try:
+            task = db.session.get(TaskProgress, task_id)
+            if task:
+                done = success and os.path.exists(output_path)
+                task.status = 'completed' if done else 'failed'
+                task.progress = 100
+                task.message = (message or '')[:255]
+                task.output_filename = os.path.basename(output_path) if done else None
+                if summary:
+                    task.row_count = summary.get('rows')
+                    task.flagged_count = summary.get('flagged')
+
+            db.session.add(ConversionHistory(
+                user_id=user_id,
+                original_filename=original_filename,
+                output_filename=os.path.basename(output_path) if success else None,
+                conversion_type=conversion_type,
+                success=bool(success),
+                error_message=None if success else message,
+            ))
+            db.session.commit()
+            log.info("[%s] %s in %.1fs — %s", task_id[:8],
+                     'completed' if success else 'failed', time.time() - started, message)
+        except Exception:
+            log.exception("[%s] could not record result", task_id[:8])
+            db.session.rollback()
+        finally:
+            if os.path.exists(upload_path):
                 try:
-                    # Import here to avoid circular dependencies if any
-                    from converters.scanned_pdf_converter import extract_data_with_gemini_full
-                    from converters.general_pdf_converter import convert_pdf_to_excel
-                    from converters.selectable_pdf_converter import extract_pdf_to_excel
-                    from converters.custom_pdf_converter import extract_custom_pdf_to_excel
-
-                    success = False
-                    message = "Unknown error"
-                    
-                    # Define progress callback
-                    def progress_callback(percent, msg):
-                        update_task_progress(task_id, percent, msg)
-
-                    if conversion_type == 'scanned':
-                        success, message = extract_data_with_gemini_full(upload_path, output_path, app.config['API_KEY'], max_pages=max_pages, progress_callback=progress_callback)
-                    elif conversion_type == 'general':
-                        success, message = convert_pdf_to_excel(upload_path, output_path, app.config['API_KEY'], max_pages=max_pages, progress_callback=progress_callback)
-                    elif conversion_type == 'selectable':
-                        success, message = extract_pdf_to_excel(upload_path, output_path, app.config['API_KEY'], max_pages=max_pages, progress_callback=progress_callback)
-                    elif conversion_type == 'custom':
-                        success, message = extract_custom_pdf_to_excel(upload_path, output_path, app.config['API_KEY'], custom_prompt, max_pages=max_pages, progress_callback=progress_callback)
-
-                    # Update task status in DB
-                    task = TaskProgress.query.get(task_id)
-                    if not task:
-                        return # Should not happen
-
-                    if success and os.path.exists(output_path):
-                        task.status = 'completed'
-                        task.progress = 100
-                        task.message = message or 'Conversion complete!'
-                        task.output_filename = os.path.basename(output_path)
-                    else:
-                        task.status = 'failed'
-                        task.progress = 100 # Reset progress
-                        task.message = message or 'Conversion failed.'
-                    
-                    # Record in conversion history
-                    history = ConversionHistory(
-                        user_id=user_id,
-                        original_filename=original_filename,
-                        output_filename=os.path.basename(output_path) if success else None,
-                        conversion_type=conversion_type,
-                        success=success,
-                        error_message=None if success else message
-                    )
-                    db.session.add(history)
-                    db.session.commit()
-
-                except Exception as e:
-                    print(f"[ERROR] Background task failed: {e}")
-                    # Update task failure in DB
-                    try:
-                        task = TaskProgress.query.get(task_id)
-                        if task:
-                            task.status = 'failed'
-                            task.message = str(e)
-                            db.session.commit()
-                    except:
-                        pass
-                finally:
-                    # Cleanup upload
-                    if os.path.exists(upload_path):
-                        try:
-                            os.remove(upload_path)
-                        except:
-                            pass
-
-        # Start background thread
-        thread = threading.Thread(target=run_conversion, args=(task_id, current_user.id, original_filename, upload_path, output_path, conversion_type, custom_prompt, max_pages))
-        thread.start()
-
-        # Check if request is AJAX
-        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-            return jsonify({'task_id': task_id, 'status': 'processing'})
-
-        # Return processing page for standard form submission
-        return render_template('processing.html', task_id=task_id)
-
-    return redirect(url_for('dashboard'))
+                    os.remove(upload_path)
+                except OSError:
+                    log.warning("Could not delete upload %s", upload_path)
 
 
 @app.route('/progress/<task_id>')
+@login_required
 def get_progress(task_id):
-    """Endpoint to get task progress"""
-    task = TaskProgress.query.get(task_id)
-    if task:
-        return jsonify(task.to_dict())
-    return jsonify({'status': 'unknown'}), 404
+    task = owned_task_or_404(task_id)
+    return jsonify(task.to_dict())
 
 
 @app.route('/result/<task_id>')
+@login_required
 def show_result(task_id):
-    """Show result page for a completed task"""
-    task = TaskProgress.query.get(task_id)
-    
-    if not task or task.status != 'completed':
-        flash('Result not ready or invalid task', 'error')
-        return redirect(url_for('dashboard'))
-    
-    output_filename = task.output_filename
-    return render_template('result.html',
-                           download_url=url_for('download_file', filename=output_filename),
-                           original_name="Converted File", # Simplified for now
-                           excel_filename=output_filename)
-
-
-
-@app.route('/download/<filename>')
-@login_required
-def download_file(filename):
-    try:
-        file_path = os.path.join(app.config['OUTPUT_FOLDER'], filename)
-        if os.path.exists(file_path):
-            download_name = f"converted_{filename.split('_', 1)[1] if '_' in filename else filename}"
-            return send_file(file_path, as_attachment=True, download_name=download_name)
-        else:
-            flash('File not found', 'error')
-            return redirect(url_for('dashboard'))
-    except Exception as e:
-        flash(f'Download error: {str(e)}', 'error')
+    task = owned_task_or_404(task_id)
+    if task.status != 'completed' or not task.output_filename:
+        flash('That conversion is not ready yet.', 'error')
         return redirect(url_for('dashboard'))
 
+    return render_template(
+        'result.html',
+        task_id=task.id,
+        download_url=url_for('download_file', task_id=task.id),
+        original_name=task.original_filename or 'your document',
+        excel_filename=task.output_filename,
+        row_count=task.row_count,
+        flagged_count=task.flagged_count,
+    )
 
-"""
-# QuickBooks Routes
-@app.route('/quickbooks/setup')
+
+@app.route('/download/<task_id>')
 @login_required
-def quickbooks_setup():
-    # QuickBooks setup page
-    qb_connected = session.get('qb_connected', False)
-    company_info = session.get('qb_company_info', {})
+def download_file(task_id):
+    """Serve the workbook by task id, so ownership is always checked."""
+    task = owned_task_or_404(task_id)
+    if not task.output_filename:
+        abort(404)
 
-    return render_template('quickbooks_setup.html',
-                           qb_connected=qb_connected,
-                           company_info=company_info)
+    path = os.path.join(app.config['OUTPUT_FOLDER'], task.output_filename)
+    if not os.path.exists(path):
+        flash('That file has expired and is no longer available.', 'error')
+        return redirect(url_for('dashboard'))
+
+    base = os.path.splitext(task.original_filename or 'converted')[0]
+    return send_file(path, as_attachment=True, download_name=f"{base}.xlsx")
 
 
-@app.route('/quickbooks/connect')
+# ------------------------------------------------------ review & correct ---
+
+@app.route('/api/rows/<task_id>', methods=['GET'])
 @login_required
-def quickbooks_connect():
-    # Start QuickBooks OAuth flow
+def get_rows(task_id):
+    """Return the extracted rows so they can be reviewed before download."""
+    task = owned_task_or_404(task_id)
+    if task.status != 'completed' or not task.output_filename:
+        abort(404)
+
+    path = os.path.join(app.config['OUTPUT_FOLDER'], task.output_filename)
+    if not os.path.exists(path):
+        abort(404)
+
     try:
-        oauth = get_quickbooks_oauth()
-        auth_url = oauth.get_authorization_url()
-        return redirect(auth_url)
-    except Exception as e:
-        flash(f'OAuth initialization failed: {str(e)}', 'error')
-        return redirect(url_for('quickbooks_setup'))
-
-
-@app.route('/quickbooks/callback')
-@login_required
-def quickbooks_callback():
-    # OAuth callback handler
-    try:
-        authorization_code = request.args.get('code')
-        realm_id = request.args.get('realmId')
-
-        if not authorization_code or not realm_id:
-            flash('Authorization failed: Missing code or realm ID', 'error')
-            return redirect(url_for('quickbooks_setup'))
-
-        # Exchange code for tokens
-        oauth = get_quickbooks_oauth()
-        tokens = oauth.get_tokens(authorization_code)
-
-        # Store in session
-        session['qb_access_token'] = tokens['access_token']
-        session['qb_refresh_token'] = tokens['refresh_token']
-        session['qb_realm_id'] = realm_id
-        session['qb_connected'] = True
-        session['qb_token_expires_at'] = time.time() + tokens['expires_in']
-
-        # Test connection and get company info
-        qb_service = QuickBooksService()
-        qb_service.set_credentials(tokens['access_token'], realm_id)
-
-        # Get company info
-        company_info, error = qb_service.get_company_info()
-        if company_info and not error:
-            session['qb_company_info'] = company_info.get('CompanyInfo', {})
-            company_name = company_info.get('CompanyInfo', {}).get('CompanyName', 'Unknown')
-            flash(f'✅ Successfully connected to QuickBooks: {company_name}', 'success')
-        else:
-            flash('✅ Connected to QuickBooks (but could not fetch company info)', 'success')
-
-        return redirect(url_for('quickbooks_setup'))
-
-    except Exception as e:
-        flash(f'Connection failed: {str(e)}', 'error')
-        return redirect(url_for('quickbooks_setup'))
-
-
-@app.route('/quickbooks/disconnect')
-@login_required
-def quickbooks_disconnect():
-    # Disconnect from QuickBooks
-    session.pop('qb_access_token', None)
-    session.pop('qb_refresh_token', None)
-    session.pop('qb_realm_id', None)
-    session.pop('qb_connected', None)
-    session.pop('qb_company_info', None)
-    session.pop('qb_token_expires_at', None)
-    flash('Disconnected from QuickBooks', 'success')
-    return redirect(url_for('quickbooks_setup'))
-
-
-@app.route('/quickbooks/test_connection')
-@login_required
-def quickbooks_test_connection():
-    # Test QuickBooks connection
-    try:
-        if not session.get('qb_connected'):
-            flash('Not connected to QuickBooks', 'error')
-            return redirect(url_for('quickbooks_setup'))
-
-        qb_service = QuickBooksService()
-        qb_service.set_credentials(
-            session.get('qb_access_token'),
-            session.get('qb_realm_id')
-        )
-
-        success, message = qb_service.test_connection()
-        if success:
-            flash('✅ Connection test successful!', 'success')
-        else:
-            flash(f'❌ Connection test failed: {message}', 'error')
-
-        return redirect(url_for('quickbooks_setup'))
-
-    except Exception as e:
-        flash(f'Connection test error: {str(e)}', 'error')
-        return redirect(url_for('quickbooks_setup'))
-
-
-@app.route('/quickbooks/refresh_token')
-@login_required
-def quickbooks_refresh_token():
-    # Manually refresh QuickBooks access token
-    try:
-        qb_service = QuickBooksService()
-        qb_service.set_credentials(
-            session.get('qb_access_token'),
-            session.get('qb_realm_id')
-        )
-        success = qb_service.refresh_access_token_if_needed()
-
-        if success:
-            flash('✅ Access token refreshed successfully', 'success')
-        else:
-            flash('❌ Failed to refresh access token', 'error')
-
-        return redirect(url_for('quickbooks_setup'))
-
-    except Exception as e:
-        flash(f'Token refresh error: {str(e)}', 'error')
-        return redirect(url_for('quickbooks_setup'))
-
-
-@app.route('/quickbooks/send_transactions', methods=['POST'])
-@login_required
-def send_to_quickbooks():
-    # Send converted transactions to QuickBooks
-    try:
-        excel_filename = request.form.get('excel_filename')
-
-        if not session.get('qb_connected'):
-            flash('Please connect to QuickBooks first', 'error')
-            return redirect(url_for('index'))
-
-        print(f"🔍 Received filename from form: {excel_filename}")
-
-        # Build the full path
-        excel_path = os.path.join(app.config['OUTPUT_FOLDER'], excel_filename)
-        print(f"🔍 Looking for file at: {excel_path}")
-
-        # Check if file exists
-        if not os.path.exists(excel_path):
-            print(f"❌ File not found at: {excel_path}")
-
-            # Debug: List all files in outputs directory
-            output_dir = app.config['OUTPUT_FOLDER']
-            if os.path.exists(output_dir):
-                all_files = os.listdir(output_dir)
-                print(f"📁 All files in outputs directory: {all_files}")
-
-                # Try to find the file with different patterns
-                # Remove .xlsx extension and search
-                base_name = excel_filename.replace('.xlsx', '')
-                matching_files = [f for f in all_files if base_name in f]
-                print(f"🔍 Files matching '{base_name}': {matching_files}")
-
-                if matching_files:
-                    # Use the first matching file
-                    actual_filename = matching_files[0]
-                    excel_path = os.path.join(output_dir, actual_filename)
-                    print(f"🔄 Using matched file: {actual_filename}")
-                else:
-                    flash(f'Excel file not found. Looking for: {excel_filename}', 'error')
-                    return redirect(url_for('index'))
-            else:
-                flash('Outputs directory does not exist', 'error')
-                return redirect(url_for('index'))
-
-        print(f"✅ File found: {excel_path}")
-        print(f"✅ File exists: {os.path.exists(excel_path)}")
-        print(f"✅ File size: {os.path.getsize(excel_path)} bytes")
-
-        # Initialize QuickBooks service
-        qb_service = QuickBooksService()
-        qb_service.set_credentials(
-            session.get('qb_access_token'),
-            session.get('qb_realm_id')
-        )
-
-        print("🚀 Starting QuickBooks transaction import...")
-
-        # Send transactions
-        success, result = qb_service.send_transactions_to_quickbooks(excel_path)
-
-        if success:
-            flash(f'✅ {result["summary"]}', 'success')
-            # Store detailed results in session to display on results page
-            session['qb_results'] = result['details']
-            session['qb_success_count'] = result['successful']
-            session['qb_failed_count'] = result['failed']
-            session['qb_total_processed'] = result['total_processed']
-        else:
-            flash(f'❌ {result}', 'error')
-
-        return redirect(url_for('quickbooks_results'))
-
-    except Exception as e:
-        import traceback
-        error_details = traceback.format_exc()
-        print(f"❌ QuickBooks integration error: {str(e)}")
-        print(f"📄 Error details: {error_details}")
-        flash(f'QuickBooks integration error: {str(e)}', 'error')
-        return redirect(url_for('index'))
-
-
-@app.route('/quickbooks/results')
-@login_required
-def quickbooks_results():
-    # Show QuickBooks transaction results
-    results = session.pop('qb_results', [])
-    success_count = session.pop('qb_success_count', 0)
-    failed_count = session.pop('qb_failed_count', 0)
-    total_processed = session.pop('qb_total_processed', 0)
-
-    return render_template('quickbooks_results.html',
-                           results=results,
-                           success_count=success_count,
-                           failed_count=failed_count,
-                           total_processed=total_processed)
-
-
-@app.route('/quickbooks/search')
-@login_required
-def quickbooks_search():
-    # Search for transactions in QuickBooks
-    try:
-        if not session.get('qb_connected'):
-            flash('Please connect to QuickBooks first', 'error')
-            return redirect(url_for('quickbooks_setup'))
-
-        from quickbooks_search import QuickBooksSearch
-
-        qb_search = QuickBooksSearch(
-            session.get('qb_access_token'),
-            session.get('qb_realm_id')
-        )
-
-        # Get transactions from last 7 days
-        transactions = qb_search.search_transactions(days_back=7)
-
-        return render_template('quickbooks_search.html',
-                               transactions=transactions,
-                               company_info=session.get('qb_company_info', {}))
-
-    except Exception as e:
-        flash(f'Search failed: {str(e)}', 'error')
-        return redirect(url_for('quickbooks_setup'))
-
-
-@app.route('/quickbooks/expenses')
-@login_required
-def quickbooks_expenses():
-    # View expense transactions similar to QuickBooks Expenses page
-    try:
-        if not session.get('qb_connected'):
-            flash('Please connect to QuickBooks first', 'error')
-            return redirect(url_for('quickbooks_setup'))
-
-        # Create search instance
-        from quickbooks_search import create_search_from_session
-        qb_search, error = create_search_from_session(session)
-
-        if error:
-            flash(f'QuickBooks error: {error}', 'error')
-            return redirect(url_for('quickbooks_setup'))
-
-        # Get expense transactions with summary and pagination
-        result = qb_search.get_expense_summary(
-            days_back=90,
-            max_results=1000,
-            top_vendors_count=3,  # Show 3 in top vendors list
-            chart_vendors_count=10  # Show 10 in pie chart
-        )
-
-        if 'error' in result:
-            flash(f'Error loading expenses: {result["error"]}', 'error')
-            return redirect(url_for('quickbooks_setup'))
-
-        # Get query info for debugging
-        query_info = result.get('query_info', {})
-        actual_results = query_info.get('actual_results', 0)
-
-        print(f"📊 Expense Results: {actual_results} transactions loaded")
-
-        # Show info message if we hit the limit
-        if actual_results >= 1000:
-            flash(f'Showing {actual_results} most recent transactions. Some older transactions may not be displayed.',
-                  'info')
-
-        return render_template('quickbooks_expenses.html',
-                               transactions=result.get('transactions', []),
-                               company_info=result.get('company', {}),
-                               summary=result.get('summary', {}),
-                               total_count=result.get('total_count', 0),
-                               query_info=query_info,
-                               error=None)
-
-    except Exception as e:
-        error_msg = f'Failed to load expenses: {str(e)}'
-        print(f"❌ {error_msg}")
-        flash(error_msg, 'error')
-        return redirect(url_for('quickbooks_setup'))
-
-
-@app.route('/quickbooks/debug-deleted')
-@login_required
-def quickbooks_debug_deleted():
-    # Debug route to see deleted transactions
-    try:
-        if not session.get('qb_connected'):
-            return jsonify({'error': 'Not connected to QuickBooks'})
-
-        from quickbooks_search import create_search_from_session
-        qb_search, error = create_search_from_session(session)
-
-        if error:
-            return jsonify({'error': error})
-
-        # Get deleted transactions
-        deleted_transactions = qb_search.get_deleted_transactions(days_back=90)
+        from openpyxl import load_workbook
+        workbook = load_workbook(path, data_only=True)
+        if 'Transactions' not in workbook.sheetnames:
+            return jsonify({'editable': False, 'rows': [], 'columns': []})
+
+        sheet = workbook['Transactions']
+        rows = list(sheet.iter_rows(values_only=True))
+        if not rows:
+            return jsonify({'editable': True, 'rows': [], 'columns': []})
+
+        headers = [str(h) if h is not None else '' for h in rows[0]]
+        payload = []
+        for values in rows[1:]:
+            record = {headers[i]: values[i] for i in range(min(len(headers), len(values)))}
+            payload.append({
+                'Date': record.get('Date') or '',
+                'Description': record.get('Description') or '',
+                'Debit': record.get('Debit'),
+                'Credit': record.get('Credit'),
+                'Balance': record.get('Balance'),
+                'Review': record.get('Review') or '',
+            })
 
         return jsonify({
-            'deleted_count': len(deleted_transactions),
-            'deleted_transactions': deleted_transactions
+            'editable': True,
+            'columns': ['Date', 'Description', 'Debit', 'Credit', 'Balance'],
+            'rows': payload,
+            'flagged': task.flagged_count or 0,
+        })
+    except Exception:
+        log.exception("Could not read workbook for task %s", task_id)
+        abort(500)
+
+
+@app.route('/api/rows/<task_id>', methods=['POST'])
+@login_required
+def save_rows(task_id):
+    """Rewrite the workbook from user-corrected rows and re-run reconciliation."""
+    task = owned_task_or_404(task_id)
+    if task.status != 'completed' or not task.output_filename:
+        abort(404)
+
+    submitted = (request.json or {}).get('rows')
+    if not isinstance(submitted, list):
+        return jsonify({'error': 'Expected a list of rows.'}), 400
+    if len(submitted) > 20000:
+        return jsonify({'error': 'That is more rows than we can save.'}), 400
+
+    from converters import common
+
+    rows = []
+    for index, item in enumerate(submitted):
+        if not isinstance(item, dict):
+            continue
+        rows.append({
+            'Date': common.as_text(item.get('Date'))[:64],
+            'Description': common.as_text(item.get('Description'))[:500],
+            'Debit': common.as_amount(item.get('Debit')),
+            'Credit': common.as_amount(item.get('Credit')),
+            'Balance': common.as_amount(item.get('Balance')),
+            '_page': 0,
+            '_row': index,
+            '_flags': [],
         })
 
-    except Exception as e:
-        return jsonify({'error': str(e)})
+    checked, flagged = common.reconcile(rows)
+    summary = common.summarise(rows, checked, flagged, 0)
 
-
-@app.route('/quickbooks/transactions')
-@login_required
-def quickbooks_transactions():
-    # Legacy route - redirect to expenses
-    return redirect(url_for('quickbooks_expenses'))
-
-
-@app.route('/quickbooks/debug-response')
-@login_required
-def quickbooks_debug_response():
-    # Debug route to see actual API response structure
+    path = os.path.join(app.config['OUTPUT_FOLDER'], task.output_filename)
     try:
-        if not session.get('qb_connected'):
-            return jsonify({'error': 'Not connected to QuickBooks'})
+        common.write_workbook(rows, path, summary)
+    except Exception:
+        log.exception("Could not rewrite workbook for task %s", task_id)
+        return jsonify({'error': 'Could not save your changes.'}), 500
 
-        from quickbooks_search import create_search_from_session
-        qb_search, error = create_search_from_session(session)
+    task.row_count = summary['rows']
+    task.flagged_count = summary['flagged']
+    db.session.commit()
+    log.info("[%s] user saved %d corrected rows, %d still flagged",
+             task_id[:8], summary['rows'], summary['flagged'])
 
-        if error:
-            return jsonify({'error': error})
-
-        # Get debug response
-        data, error = qb_search.debug_api_response()
-
-        if error:
-            return jsonify({'error': error})
-
-        return jsonify(data)
-
-    except Exception as e:
-        return jsonify({'error': str(e)})
+    return jsonify({'saved': True, 'rows': summary['rows'], 'flagged': summary['flagged']})
 
 
-@app.route('/quickbooks/reconnect')
-@login_required
-def quickbooks_reconnect():
-    # Force reconnection to QuickBooks
-    session.pop('qb_access_token', None)
-    session.pop('qb_refresh_token', None)
-    session.pop('qb_realm_id', None)
-    session.pop('qb_connected', None)
-    session.pop('qb_company_info', None)
-    session.pop('qb_token_expires_at', None)
-    flash('Please reconnect to QuickBooks with fresh credentials', 'info')
-    return redirect(url_for('quickbooks_connect'))
-"""
-# Note: QuickBooks routes have been commented out by request.
-# To restore, remove the triple quotes above and below this section.
+# ----------------------------------------------------------- maintenance ---
 
+def purge_expired_outputs():
+    """Delete workbooks and task rows past the retention window."""
+    hours = app.config.get('OUTPUT_RETENTION_HOURS', 48)
+    cutoff = datetime.utcnow() - timedelta(hours=hours)
+    removed_files = 0
+
+    with app.app_context():
+        try:
+            for task in TaskProgress.query.filter(TaskProgress.created_at < cutoff).all():
+                if task.output_filename:
+                    path = os.path.join(app.config['OUTPUT_FOLDER'], task.output_filename)
+                    if os.path.exists(path):
+                        try:
+                            os.remove(path)
+                            removed_files += 1
+                        except OSError:
+                            pass
+                db.session.delete(task)
+            db.session.commit()
+        except Exception:
+            log.exception("Retention purge failed")
+            db.session.rollback()
+            return
+
+        # Uploads are removed after each conversion; anything left is an orphan.
+        upload_dir = app.config['UPLOAD_FOLDER']
+        if os.path.isdir(upload_dir):
+            for name in os.listdir(upload_dir):
+                path = os.path.join(upload_dir, name)
+                try:
+                    if os.path.isfile(path) and datetime.utcfromtimestamp(os.path.getmtime(path)) < cutoff:
+                        os.remove(path)
+                        removed_files += 1
+                except OSError:
+                    pass
+
+    if removed_files:
+        log.info("Retention purge removed %d file(s) older than %dh", removed_files, hours)
+
+
+def fail_orphaned_tasks():
+    """
+    Mark tasks abandoned by a restart as failed.
+
+    Conversions run in a plain thread, so a deploy kills anything in flight and
+    the browser would otherwise poll a 'processing' row forever.
+    """
+    cutoff = datetime.utcnow() - timedelta(hours=2)
+    with app.app_context():
+        try:
+            stale = TaskProgress.query.filter(
+                TaskProgress.status == 'processing',
+                TaskProgress.updated_at < cutoff,
+            ).all()
+            for task in stale:
+                task.status = 'failed'
+                task.message = 'The conversion was interrupted. Please try again.'
+            if stale:
+                db.session.commit()
+                log.info("Marked %d interrupted task(s) as failed", len(stale))
+        except Exception:
+            log.exception("Could not reconcile interrupted tasks")
+            db.session.rollback()
+
+
+def start_maintenance_thread():
+    def loop():
+        # Stagger workers so three Gunicorn processes don't purge simultaneously.
+        time.sleep(30 + (os.getpid() % 60))
+        while True:
+            fail_orphaned_tasks()
+            purge_expired_outputs()
+            time.sleep(3600)
+
+    threading.Thread(target=loop, daemon=True).start()
+
+
+if os.environ.get('ENABLE_MAINTENANCE', 'true').lower() == 'true':
+    start_maintenance_thread()
+
+
+# --------------------------------------------------------------- errors ----
+
+@app.errorhandler(404)
+def not_found(_):
+    return render_template('error.html',
+                           code=404,
+                           title='Page not found',
+                           detail='That page does not exist, or it is not yours to view.'), 404
+
+
+@app.errorhandler(413)
+def too_large(_):
+    return render_template('error.html',
+                           code=413,
+                           title='That file is too large',
+                           detail='The upload exceeded the size limit.'), 413
+
+
+@app.errorhandler(500)
+def server_error(_):
+    db.session.rollback()
+    return render_template('error.html',
+                           code=500,
+                           title='Something went wrong',
+                           detail='The error has been logged. Please try again.'), 500
 
 
 if __name__ == '__main__':
     ensure_directories()
-    
-    # Initialize database tables
     with app.app_context():
         db.create_all()
-        
-        # Create default admin user if not exists
-        from database import create_default_admin
-        create_default_admin()
-    
-    debug_mode = os.environ.get('FLASK_DEBUG', 'True').lower() == 'true'
-    app.run(debug=debug_mode)
+        from database import create_admin_from_env
+        create_admin_from_env()
+
+    app.run(debug=os.environ.get('FLASK_DEBUG', 'False').lower() == 'true')

@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+
+{% block title %}{{ title }} — Excel Automation{% endblock %}
+{% block container_class %}container--narrow{% endblock %}
+
+{% block content %}
+<div class="card stack">
+    <span class="eyebrow">Error {{ code }}</span>
+    <h1 style="font-size: var(--fs-lg);">{{ title }}</h1>
+    <p style="color: var(--text-2);">{{ detail }}</p>
+    <a href="{{ url_for('index') }}" class="btn btn--secondary">
+        {{ icon('arrow-right', 17) }} Back to the start
+    </a>
+</div>
+{% endblock %}

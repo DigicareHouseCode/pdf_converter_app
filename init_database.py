@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from app import app
 from models import db, User
-from database import create_default_admin
+from database import create_admin_from_env
 
 
 def main():
@@ -27,9 +27,9 @@ def main():
             db.create_all()
             print("[SUCCESS] Database tables created successfully!")
             
-            # Create default admin user
-            print("\n[ADMIN] Setting up default admin user...")
-            create_default_admin()
+            # Create an admin user only if ADMIN_USERNAME/ADMIN_PASSWORD are set
+            print("\n[ADMIN] Checking for admin credentials in the environment...")
+            create_admin_from_env()
             
             # Verify tables
             print("\n[VERIFY] Verifying tables...")
@@ -46,7 +46,7 @@ def main():
             print("[SUCCESS] Database initialization complete!")
             print("=" * 50)
             print("\nYou can now run the application with: python app.py")
-            print("Login with: username='admin', password='password'")
+            print("Set ADMIN_USERNAME and ADMIN_PASSWORD in .env to create an admin user.")
             
     except Exception as e:
         print(f"\n[ERROR] Error during initialization: {str(e)}")

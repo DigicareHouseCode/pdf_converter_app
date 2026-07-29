@@ -17,6 +17,11 @@
         });
     }
 
+    function csrfToken() {
+        var meta = document.querySelector('meta[name="csrf-token"]');
+        return meta ? meta.getAttribute('content') : '';
+    }
+
     /* ---------- theme ---------- */
 
     var themeToggle = document.getElementById('themeToggle');
@@ -42,6 +47,133 @@
             btn.setAttribute('aria-expanded', open ? 'true' : 'false');
         });
     });
+
+    /* ---------- review & correct table ---------- */
+
+    var reviewRoot = document.getElementById('reviewRoot');
+    if (reviewRoot) {
+        (function () {
+            var taskId = reviewRoot.dataset.taskId;
+            var tbody = document.querySelector('#reviewTable tbody');
+            var wrap = document.getElementById('tableWrap');
+            var status = document.getElementById('reviewStatus');
+            var saveBtn = document.getElementById('saveBtn');
+            var saveState = document.getElementById('saveState');
+            var root = window.APP_ROOT || '';
+            var dirty = false;
+
+            function money(v) {
+                if (v === null || v === undefined || v === '') return '';
+                var n = Number(v);
+                return isNaN(n) ? String(v) : n.toFixed(2);
+            }
+
+            function markDirty(tr) {
+                dirty = true;
+                if (tr) tr.classList.add('row-dirty');
+                saveBtn.disabled = false;
+                saveState.textContent = 'Unsaved changes';
+                saveState.removeAttribute('data-state');
+            }
+
+            function cell(value, cls, tr) {
+                var td = document.createElement('td');
+                var input = document.createElement('input');
+                input.className = 'cell' + (cls ? ' ' + cls : '');
+                input.value = value === null || value === undefined ? '' : value;
+                input.addEventListener('input', function () { markDirty(tr); });
+                td.appendChild(input);
+                return td;
+            }
+
+            function render(rows) {
+                tbody.textContent = '';
+                rows.forEach(function (row, i) {
+                    var tr = document.createElement('tr');
+                    if (row.Review) tr.className = 'is-flagged';
+
+                    var n = document.createElement('td');
+                    n.className = 'cell--index';
+                    n.textContent = i + 1;
+                    tr.appendChild(n);
+
+                    tr.appendChild(cell(row.Date, '', tr));
+                    tr.appendChild(cell(row.Description, '', tr));
+                    tr.appendChild(cell(money(row.Debit), 'cell--num', tr));
+                    tr.appendChild(cell(money(row.Credit), 'cell--num', tr));
+                    tr.appendChild(cell(money(row.Balance), 'cell--num', tr));
+
+                    var note = document.createElement('td');
+                    note.className = 'cell--note';
+                    note.textContent = row.Review || '';
+                    tr.appendChild(note);
+
+                    tbody.appendChild(tr);
+                });
+            }
+
+            function collect() {
+                return Array.prototype.map.call(tbody.querySelectorAll('tr'), function (tr) {
+                    var inputs = tr.querySelectorAll('input.cell');
+                    return {
+                        Date: inputs[0].value,
+                        Description: inputs[1].value,
+                        Debit: inputs[2].value,
+                        Credit: inputs[3].value,
+                        Balance: inputs[4].value
+                    };
+                });
+            }
+
+            fetch(root + '/api/rows/' + taskId)
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    if (!data.rows || !data.rows.length) {
+                        status.textContent = 'No rows to show for this conversion.';
+                        return;
+                    }
+                    render(data.rows);
+                    status.hidden = true;
+                    wrap.hidden = false;
+                })
+                .catch(function () {
+                    status.textContent = 'Could not load the extracted data. The download still works.';
+                });
+
+            saveBtn.addEventListener('click', function () {
+                saveBtn.disabled = true;
+                saveState.textContent = 'Saving…';
+                saveState.removeAttribute('data-state');
+
+                fetch(root + '/api/rows/' + taskId, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken() },
+                    body: JSON.stringify({ rows: collect() })
+                })
+                    .then(function (r) { return r.json(); })
+                    .then(function (data) {
+                        if (data.error) throw new Error(data.error);
+                        dirty = false;
+                        saveState.textContent = data.flagged
+                            ? 'Saved — ' + data.flagged + ' row(s) still flagged'
+                            : 'Saved — balance reconciles';
+                        saveState.setAttribute('data-state', 'saved');
+                        tbody.querySelectorAll('.row-dirty').forEach(function (tr) {
+                            tr.classList.remove('row-dirty');
+                        });
+                    })
+                    .catch(function () {
+                        saveState.textContent = 'Could not save. Try again.';
+                        saveState.setAttribute('data-state', 'error');
+                        saveBtn.disabled = false;
+                    });
+            });
+
+            window.addEventListener('beforeunload', function (e) {
+                if (dirty) { e.preventDefault(); e.returnValue = ''; }
+            });
+        })();
+    }
 
     /* ---------- upload form ---------- */
 

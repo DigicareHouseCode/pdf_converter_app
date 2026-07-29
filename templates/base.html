@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Excel Automation{% endblock %}</title>
     <meta name="description" content="{% block description %}Convert PDF bank statements and invoices into structured Excel files.{% endblock %}">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="shortcut icon" href="{{ url_for('static', filename='images/favicon.ico') }}" type="image/x-icon">
     <script>
@@ -89,7 +90,7 @@
 
     <footer class="footer">
         <div class="footer-content">
-            <span>&copy; {{ 2026 }} Excel Automation — Powered by DigiCare Products</span>
+            <span>&copy; {{ now.year }} Excel Automation — Powered by DigiCare Products</span>
             <a href="https://digicareproducts.com/" target="_blank" rel="noopener">digicareproducts.com</a>
         </div>
     </footer>

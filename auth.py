@@ -1,128 +1,132 @@
-import os
-# ⚠️ Only for LOCAL testing - MUST be set before oauthlib imports
-os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
-
 import json
+import logging
+import os
+import secrets
+
 import requests
-from flask import Blueprint, redirect, request, url_for, current_app
+from flask import Blueprint, current_app, flash, redirect, request, session, url_for
 from flask_login import login_user
 from oauthlib.oauth2 import WebApplicationClient
-from models import db, User
+
 from datetime import datetime
+
+from models import User, db
+
+log = logging.getLogger(__name__)
+
+# oauthlib refuses to run OAuth over plain HTTP. That is the correct default:
+# relax it only for local development, never in production. This used to be
+# set unconditionally at import time, in every environment.
+if os.environ.get('FLASK_DEBUG', 'False').lower() == 'true':
+    os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
 
 auth_bp = Blueprint('auth', __name__)
 
+_STATE_KEY = 'oauth_state'
+
+
 def get_google_provider_cfg():
-    return requests.get(current_app.config['GOOGLE_DISCOVERY_URL']).json()
+    return requests.get(current_app.config['GOOGLE_DISCOVERY_URL'], timeout=15).json()
 
 
-# =========================
-# GOOGLE LOGIN
-# =========================
-@auth_bp.route("/google")
+def _redirect_uri():
+    uri = url_for('auth.google_callback', _external=True)
+    if uri.startswith('http://') and 'localhost' not in uri and '127.0.0.1' not in uri:
+        uri = uri.replace('http://', 'https://', 1)
+    return uri
+
+
+@auth_bp.route('/google')
 def google_login():
-    google_provider_cfg = get_google_provider_cfg()
-    authorization_endpoint = google_provider_cfg["authorization_endpoint"]
+    if not current_app.config.get('GOOGLE_CLIENT_ID'):
+        flash('Google sign-in is not configured.', 'error')
+        return redirect(url_for('login'))
+
+    try:
+        authorization_endpoint = get_google_provider_cfg()['authorization_endpoint']
+    except Exception:
+        log.exception("Could not reach Google's discovery document")
+        flash('Google sign-in is unavailable right now.', 'error')
+        return redirect(url_for('login'))
+
+    # Single-use CSRF token for the round trip. Without it, an attacker can
+    # feed the callback their own authorization code and land the victim in
+    # the attacker's account.
+    state = secrets.token_urlsafe(32)
+    session[_STATE_KEY] = state
 
     client = WebApplicationClient(current_app.config['GOOGLE_CLIENT_ID'])
-
-    redirect_uri = url_for("auth.google_callback", _external=True)
-
-    # Force HTTPS only on production (non-local) environments
-    if redirect_uri.startswith("http://") and "localhost" not in redirect_uri and "127.0.0.1" not in redirect_uri:
-        redirect_uri = redirect_uri.replace("http://", "https://", 1)
-    
-    print(f"\n[OAUTH DEBUG] Redirecting to Google with URI: {redirect_uri}")
-
     request_uri = client.prepare_request_uri(
         authorization_endpoint,
-        redirect_uri=redirect_uri,
-        scope=["openid", "email", "profile"],
+        redirect_uri=_redirect_uri(),
+        scope=['openid', 'email', 'profile'],
+        state=state,
     )
-
     return redirect(request_uri)
 
 
-# =========================
-# GOOGLE CALLBACK
-# =========================
-@auth_bp.route("/google/callback")
+@auth_bp.route('/google/callback')
 def google_callback():
-    code = request.args.get("code")
+    expected = session.pop(_STATE_KEY, None)
+    received = request.args.get('state')
+    if not expected or not received or not secrets.compare_digest(expected, received):
+        log.warning("OAuth callback rejected: state mismatch")
+        flash('That sign-in link has expired. Please try again.', 'error')
+        return redirect(url_for('login'))
+
+    code = request.args.get('code')
     if not code:
-        return "Missing authorization code", 400
+        flash('Google did not return an authorization code.', 'error')
+        return redirect(url_for('login'))
 
-    google_provider_cfg = get_google_provider_cfg()
-    token_endpoint = google_provider_cfg["token_endpoint"]
+    try:
+        provider_cfg = get_google_provider_cfg()
+        client = WebApplicationClient(current_app.config['GOOGLE_CLIENT_ID'])
 
-    client = WebApplicationClient(current_app.config['GOOGLE_CLIENT_ID'])
+        token_url, headers, body = client.prepare_token_request(
+            provider_cfg['token_endpoint'],
+            authorization_response=request.url,
+            redirect_url=_redirect_uri(),
+            code=code,
+        )
 
-    redirect_uri = url_for("auth.google_callback", _external=True)
-    # Force HTTPS only on production (non-local) environments
-    if redirect_uri.startswith("http://") and "localhost" not in redirect_uri and "127.0.0.1" not in redirect_uri:
-        redirect_uri = redirect_uri.replace("http://", "https://", 1)
+        token_response = requests.post(
+            token_url, headers=headers, data=body, timeout=20,
+            auth=(current_app.config['GOOGLE_CLIENT_ID'],
+                  current_app.config['GOOGLE_CLIENT_SECRET']),
+        )
 
-    print(f"[DEBUG] Using Redirect URI: {redirect_uri}")
+        if token_response.status_code != 200:
+            # Never echo the provider's response body back to the browser.
+            log.error("Google token exchange failed: %s", token_response.status_code)
+            flash('Google sign-in failed. Please try again.', 'error')
+            return redirect(url_for('login'))
 
-    # Prepare the token request
-    token_url, headers, body = client.prepare_token_request(
-        token_endpoint,
-        authorization_response=request.url,
-        redirect_url=redirect_uri,
-        code=code
-    )
+        client.parse_request_body_response(json.dumps(token_response.json()))
+        uri, headers, body = client.add_token(provider_cfg['userinfo_endpoint'])
+        userinfo = requests.get(uri, headers=headers, timeout=20).json()
+    except Exception:
+        log.exception("Google sign-in failed")
+        flash('Google sign-in failed. Please try again.', 'error')
+        return redirect(url_for('login'))
 
-    # Send token request with Basic Auth
-    token_response = requests.post(
-        token_url,
-        headers=headers,
-        data=body,
-        auth=(
-            current_app.config['GOOGLE_CLIENT_ID'],
-            current_app.config['GOOGLE_CLIENT_SECRET'],
-        ),
-    )
+    if not userinfo.get('email_verified'):
+        flash('Your Google account does not have a verified email address.', 'error')
+        return redirect(url_for('login'))
 
-    # Debug: Check for errors in response
-    if token_response.status_code != 200:
-        print(f"[DEBUG] Google Token Error Status: {token_response.status_code}")
-        print(f"[DEBUG] Google Token Error Body: {token_response.text}")
-        try:
-            error_data = token_response.json()
-            error_msg = error_data.get('error_description', error_data.get('error', 'Unknown error'))
-            return f"Error from Google (Status {token_response.status_code}): {error_msg}", 400
-        except:
-            return f"Failed to get token from Google. Status: {token_response.status_code}. Response: {token_response.text[:100]}", 400
-
-    client.parse_request_body_response(json.dumps(token_response.json()))
-
-    userinfo_endpoint = google_provider_cfg["userinfo_endpoint"]
-    uri, headers, body = client.add_token(userinfo_endpoint)
-    userinfo = requests.get(uri, headers=headers).json()
-
-    if not userinfo.get("email_verified"):
-        return "Email not verified by Google", 400
-
-    google_id = userinfo["sub"]
-    email = userinfo["email"]
-    name = userinfo.get("given_name", "")
-    picture = userinfo.get("picture", "")
+    google_id = userinfo['sub']
+    email = (userinfo.get('email') or '').lower()
+    name = userinfo.get('given_name', '')
+    picture = userinfo.get('picture', '')
 
     user = User.query.filter_by(google_id=google_id).first()
-
     if not user:
-        user = User.query.filter_by(email=email).first()
+        user = User.query.filter_by(email=email).first() if email else None
         if user:
             user.google_id = google_id
         else:
-            user = User(
-                google_id=google_id,
-                email=email,
-                username=email,
-                name=name,
-                picture_url=picture,
-                last_login=datetime.utcnow(),
-            )
+            user = User(google_id=google_id, email=email, username=email or google_id,
+                        name=name, picture_url=picture)
             db.session.add(user)
 
     user.name = name
@@ -131,5 +135,5 @@ def google_callback():
     db.session.commit()
 
     login_user(user, remember=True)
-
-    return redirect(url_for("dashboard"))
+    log.info("Google sign-in succeeded for user %s", user.id)
+    return redirect(url_for('dashboard'))

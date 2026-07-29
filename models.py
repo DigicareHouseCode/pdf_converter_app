@@ -65,12 +65,19 @@ class ConversionHistory(db.Model):
 class TaskProgress(db.Model):
     """Store task progress for background jobs"""
     __tablename__ = 'task_progress'
-    
+
     id = db.Column(db.String(36), primary_key=True)  # UUID
+    # Ownership. Without this, any user could poll or download any other
+    # user's conversion by guessing a task id or filename.
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True, index=True)
     status = db.Column(db.String(50), default='processing')
     progress = db.Column(db.Integer, default=0)
     message = db.Column(db.String(255), default='Initializing...')
     output_filename = db.Column(db.String(255), nullable=True)
+    original_filename = db.Column(db.String(255), nullable=True)
+    # Reconciliation summary, surfaced on the result page.
+    row_count = db.Column(db.Integer, nullable=True)
+    flagged_count = db.Column(db.Integer, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -80,7 +87,9 @@ class TaskProgress(db.Model):
             'status': self.status,
             'progress': self.progress,
             'message': self.message,
-            'output_filename': self.output_filename
+            'output_filename': self.output_filename,
+            'row_count': self.row_count,
+            'flagged_count': self.flagged_count,
         }
 
 

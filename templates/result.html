@@ -1,29 +1,87 @@
 {% extends "base.html" %}
 {% from "_icons.html" import icon %}
 
-{% block title %}Conversion complete — Excel Automation{% endblock %}
-{% block container_class %}container--mid{% endblock %}
+{% block title %}Review your data — Excel Automation{% endblock %}
 
 {% block content %}
-<div class="card stack">
-    <div class="row">
-        <span class="result-icon">{{ icon('check', 22) }}</span>
-        <div>
-            <h1 style="font-size: var(--fs-lg);">Conversion complete</h1>
-            <p style="color: var(--text-2); font-size: var(--fs-sm);">Your workbook is ready to download.</p>
+<div class="stack" data-task-id="{{ task_id }}" id="reviewRoot">
+
+    <div class="card stack">
+        <div class="row">
+            <span class="result-icon">{{ icon('check', 22) }}</span>
+            <div>
+                <h1 style="font-size: var(--fs-lg);">Conversion complete</h1>
+                <p style="color: var(--text-2); font-size: var(--fs-sm);">
+                    From {{ original_name }}
+                </p>
+            </div>
+            <span class="spacer"></span>
+            <a href="{{ download_url }}" class="btn btn--primary">
+                {{ icon('download', 17) }} Download Excel
+            </a>
         </div>
+
+        <div class="detail-list">
+            <div class="detail-row">
+                {{ icon('sheet', 16) }}
+                <span class="detail-label">Rows extracted</span>
+                <span class="detail-value num">{{ row_count if row_count is not none else '—' }}</span>
+            </div>
+            <div class="detail-row">
+                {% if flagged_count %}{{ icon('alert', 16) }}{% else %}{{ icon('check-circle', 16) }}{% endif %}
+                <span class="detail-label">Balance check</span>
+                <span class="detail-value">
+                    {% if flagged_count %}
+                    {{ flagged_count }} row{{ 's' if flagged_count != 1 }} need review
+                    {% elif row_count %}
+                    Running balance reconciles
+                    {% else %}
+                    Not available
+                    {% endif %}
+                </span>
+            </div>
+        </div>
+
+        {% if flagged_count %}
+        <div class="alert alert-warning" role="status">
+            {{ icon('info', 16) }}
+            <span>
+                {{ flagged_count }} row{{ 's' if flagged_count != 1 }} did not match the running balance on the
+                statement. They are highlighted below — correct them here and the workbook updates.
+            </span>
+        </div>
+        {% endif %}
     </div>
 
-    <div class="detail-list">
-        <div class="detail-row">
-            {{ icon('file', 16) }}
-            <span class="detail-label">Source</span>
-            <span class="detail-value">{{ original_name }}</span>
+    <!-- Review table -->
+    <div class="card card--flush">
+        <div class="review-head">
+            <div>
+                <h2 style="font-size: var(--fs-md);">Check the data</h2>
+                <p class="field-hint">Click any cell to edit. Changes are saved to the workbook.</p>
+            </div>
+            <span class="spacer"></span>
+            <span class="save-state" id="saveState" aria-live="polite"></span>
+            <button type="button" class="btn btn--secondary" id="saveBtn" disabled>Save changes</button>
         </div>
-        <div class="detail-row">
-            {{ icon('sheet', 16) }}
-            <span class="detail-label">Workbook</span>
-            <span class="detail-value">{{ excel_filename }}</span>
+
+        <div id="reviewStatus" class="review-empty">Loading your data…</div>
+
+        <div class="table-scroll" hidden id="tableWrap">
+            <table class="data-table" id="reviewTable">
+                <thead>
+                    <tr>
+                        <th class="col-n">#</th>
+                        <th>Date</th>
+                        <th>Description</th>
+                        <th class="col-money">Debit</th>
+                        <th class="col-money">Credit</th>
+                        <th class="col-money">Balance</th>
+                        <th>Review</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
         </div>
     </div>
 
@@ -35,9 +93,5 @@
             {{ icon('refresh', 17) }} Convert another
         </a>
     </div>
-
-    <p class="field-hint">
-        Check the totals against your statement before filing. Extraction is accurate but not infallible.
-    </p>
 </div>
 {% endblock %}
