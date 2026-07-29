@@ -10,14 +10,19 @@
 <!-- Wizard Header / Timeline -->
 <div class="wizard-header" style="margin-top: var(--s4); margin-bottom: var(--s6); text-align: center;">
     <h1 style="font-size: var(--fs-xl); margin-bottom: var(--s3);">Convert your documents</h1>
-    <div class="wizard-timeline" style="display: flex; align-items: center; justify-content: center; gap: var(--s3); font-size: var(--fs-sm); font-weight: 500;">
+    <div class="wizard-timeline"
+        style="display: flex; align-items: center; justify-content: center; gap: var(--s3); font-size: var(--fs-sm); font-weight: 500;">
         <div id="step1-indicator" style="display: flex; align-items: center; gap: var(--s2); color: var(--accent);">
-            <div style="width: 24px; height: 24px; border-radius: 50%; background: var(--accent); color: white; display: flex; align-items: center; justify-content: center; font-size: 0.75rem;">1</div>
+            <div
+                style="width: 24px; height: 24px; border-radius: 50%; background: var(--accent); color: white; display: flex; align-items: center; justify-content: center; font-size: 0.75rem;">
+                1</div>
             <span>Select Mode</span>
         </div>
         <div style="height: 1px; width: 40px; background: var(--border-strong);"></div>
         <div id="step2-indicator" style="display: flex; align-items: center; gap: var(--s2); color: var(--text-3);">
-            <div style="width: 24px; height: 24px; border-radius: 50%; background: var(--surface-2); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 0.75rem;">2</div>
+            <div
+                style="width: 24px; height: 24px; border-radius: 50%; background: var(--surface-2); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 0.75rem;">
+                2</div>
             <span>Upload Document</span>
         </div>
     </div>
@@ -26,10 +31,12 @@
 <div class="card upload-card stack" style="padding: var(--s6);">
     <!-- Usage Banner -->
     {% if not is_pro %}
-    <div class="usage-banner" style="background: var(--bg-2); border-radius: var(--radius-sm); padding: var(--s3); display: flex; align-items: center; justify-content: space-between; font-size: var(--fs-sm); margin-bottom: var(--s4);">
+    <div class="usage-banner"
+        style="background: var(--bg-2); border-radius: var(--radius-sm); padding: var(--s3); display: flex; align-items: center; justify-content: space-between; font-size: var(--fs-sm); margin-bottom: var(--s4);">
         <div style="display: flex; align-items: center; gap: var(--s2);">
             {{ icon('info', 16) }}
-            <span><strong>Free Plan:</strong> {{ conversion_count }} / {{ conversion_limit }} conversions used. (First {{ free_page_limit }} pages only)</span>
+            <span><strong>Free Plan:</strong> {{ conversion_count }} / {{ conversion_limit }} conversions used. (First
+                {{ free_page_limit }} pages only)</span>
         </div>
         <a href="{{ url_for('cart') }}" class="btn btn--secondary btn--sm">Upgrade</a>
     </div>
@@ -42,21 +49,21 @@
     </div>
     {% endif %}
 
-    <form id="uploadForm" action="{{ url_for('upload_file') }}" method="post"
-          enctype="multipart/form-data"
-          data-max-checks="{{ max_check_files }}">
+    <form id="uploadForm" action="{{ url_for('upload_file') }}" method="post" enctype="multipart/form-data"
+        data-max-checks="{{ max_check_files }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
         <!-- STEP 1: Conversion Mode -->
         <div id="wizard-step-1" class="wizard-step">
             <fieldset style="border:0; padding: 0;">
                 <legend class="field-label" style="font-size: 1.1rem; margin-bottom: var(--s4);">
-                    1. Select Conversion Mode
+                    Select Conversion Mode
                 </legend>
 
                 <div class="option-cards" style="display: flex; gap: var(--s2); width: 100%;">
                     <label class="option-card {% if not is_pro %}pro-locked{% endif %}" style="flex: 1;">
-                        <input type="radio" name="conversion_type" value="scanned" required {% if not is_pro %}disabled{% endif %} checked>
+                        <input type="radio" name="conversion_type" value="scanned" required {% if not is_pro
+                            %}disabled{% endif %} checked>
                         <span class="card-content" style="align-items: center; text-align: center;">
                             {% if not is_pro %}<span class="pro-badge">Pro</span>{% endif %}
                             {{ icon('camera', 24) }}
@@ -80,8 +87,10 @@
                         </span>
                     </label>
 
-                    <label class="option-card {% if not is_pro %}pro-locked{% endif %}" id="customRadioLabel" style="flex: 1;">
-                        <input type="radio" name="conversion_type" value="custom" id="customRadio" required {% if not is_pro %}disabled{% endif %}>
+                    <label class="option-card {% if not is_pro %}pro-locked{% endif %}" id="customRadioLabel"
+                        style="flex: 1;">
+                        <input type="radio" name="conversion_type" value="custom" id="customRadio" required {% if not
+                            is_pro %}disabled{% endif %}>
                         <span class="card-content" style="align-items: center; text-align: center;">
                             {% if not is_pro %}<span class="pro-badge">Pro</span>{% endif %}
                             {{ icon('edit', 24) }}
@@ -102,16 +111,22 @@
             </fieldset>
 
             <!-- Custom instructions -->
-            <div id="customPromptSection" class="custom-prompt-section" style="margin-top: var(--s4); background: var(--surface-2); padding: var(--s4); border-radius: var(--radius);">
+            <div id="customPromptSection" class="custom-prompt-section"
+                style="margin-top: var(--s4); background: var(--surface-2); padding: var(--s4); border-radius: var(--radius);">
                 <label class="field-label" for="customPrompt" id="promptLabel">Extraction instructions</label>
                 <textarea id="customPrompt" name="custom_prompt" rows="3"
-                          placeholder="e.g., Extract: Date, Description, Amount, Category" style="margin-bottom: var(--s3); background: var(--bg);"></textarea>
-                
+                    placeholder="e.g., Extract: Date, Description, Amount, Category"
+                    style="margin-bottom: var(--s3); background: var(--bg);"></textarea>
+
                 <div class="stack-sm">
                     <span class="field-hint">Templates:</span>
                     <div class="example-buttons" style="display: flex; gap: var(--s2); flex-wrap: wrap;">
-                        <button type="button" class="btn btn--secondary btn--sm example-btn" style="background: var(--bg);" data-prompt="Extract: Date, Description, Amount, Category, Account">Bank Statement</button>
-                        <button type="button" class="btn btn--secondary btn--sm example-btn" style="background: var(--bg);" data-prompt="Extract: Invoice #, Date, Customer, Item, Quantity, Unit Price, Total">Invoice</button>
+                        <button type="button" class="btn btn--secondary btn--sm example-btn"
+                            style="background: var(--bg);"
+                            data-prompt="Extract: Date, Description, Amount, Category, Account">Bank Statement</button>
+                        <button type="button" class="btn btn--secondary btn--sm example-btn"
+                            style="background: var(--bg);"
+                            data-prompt="Extract: Invoice #, Date, Customer, Item, Quantity, Unit Price, Total">Invoice</button>
                     </div>
                 </div>
             </div>
@@ -127,14 +142,17 @@
         <div id="wizard-step-2" class="wizard-step" hidden>
             <div style="margin-bottom: var(--s4);">
                 <label class="field-label" style="font-size: 1.1rem; margin-bottom: var(--s4);">
-                    2. Upload Document
+                    Upload Document
                 </label>
 
                 <div class="file-input-container">
                     <input type="file" id="fileInput" name="file" accept=".pdf" required>
-                    <label for="fileInput" class="file-input-label" style="min-height: 220px; background: var(--surface-2); border-style: dashed; border-width: 2px;">
+                    <label for="fileInput" class="file-input-label"
+                        style="min-height: 220px; background: var(--surface-2); border-style: dashed; border-width: 2px;">
                         {{ icon('upload', 40) }}
-                        <span id="dropzoneText" class="file-text" style="font-size: var(--fs-md); font-weight: 500; margin-top: var(--s2);">Choose a PDF or drag it here</span>
+                        <span id="dropzoneText" class="file-text"
+                            style="font-size: var(--fs-md); font-weight: 500; margin-top: var(--s2);">Choose a PDF or
+                            drag it here</span>
                         <span id="dropzoneSubtext" class="file-size" style="margin-top: var(--s1);">PDF only</span>
                     </label>
 
@@ -154,8 +172,8 @@
                 <button type="button" class="btn btn--secondary btn--lg" id="btnPrevStep">
                     {{ icon('arrow-left', 16) }} Back
                 </button>
-                <button type="submit" class="btn btn--primary btn--lg" style="flex: 1;" id="convertBtn"
-                        {% if limit_reached %}disabled{% endif %}>
+                <button type="submit" class="btn btn--primary btn--lg" style="flex: 1;" id="convertBtn" {% if
+                    limit_reached %}disabled{% endif %}>
                     {% if limit_reached %}
                     Free limit reached — Upgrade required
                     {% else %}
@@ -184,57 +202,57 @@
 </div>
 
 <script>
-document.addEventListener('DOMContentLoaded', () => {
-    const btnNext = document.getElementById('btnNextStep');
-    const btnPrev = document.getElementById('btnPrevStep');
-    const step1 = document.getElementById('wizard-step-1');
-    const step2 = document.getElementById('wizard-step-2');
-    const ind1 = document.getElementById('step1-indicator');
-    const ind2 = document.getElementById('step2-indicator');
+    document.addEventListener('DOMContentLoaded', () => {
+        const btnNext = document.getElementById('btnNextStep');
+        const btnPrev = document.getElementById('btnPrevStep');
+        const step1 = document.getElementById('wizard-step-1');
+        const step2 = document.getElementById('wizard-step-2');
+        const ind1 = document.getElementById('step1-indicator');
+        const ind2 = document.getElementById('step2-indicator');
 
-    if(btnNext && btnPrev) {
-        btnNext.addEventListener('click', () => {
-            const selectedMode = document.querySelector('input[name="conversion_type"]:checked');
-            const customPrompt = document.getElementById('customPrompt');
-            if (selectedMode && selectedMode.value === 'custom') {
-                if (!customPrompt.value.trim()) {
-                    customPrompt.focus();
-                    customPrompt.reportValidity();
-                    return;
+        if (btnNext && btnPrev) {
+            btnNext.addEventListener('click', () => {
+                const selectedMode = document.querySelector('input[name="conversion_type"]:checked');
+                const customPrompt = document.getElementById('customPrompt');
+                if (selectedMode && selectedMode.value === 'custom') {
+                    if (!customPrompt.value.trim()) {
+                        customPrompt.focus();
+                        customPrompt.reportValidity();
+                        return;
+                    }
                 }
-            }
 
-            step1.hidden = true;
-            step2.hidden = false;
-            
-            // Update indicators
-            ind1.style.color = 'var(--text-3)';
-            ind1.querySelector('div').style.background = 'var(--surface-2)';
-            ind1.querySelector('div').style.color = 'inherit';
-            ind1.querySelector('div').style.borderColor = 'var(--border)';
-            
-            ind2.style.color = 'var(--accent)';
-            ind2.querySelector('div').style.background = 'var(--accent)';
-            ind2.querySelector('div').style.color = 'white';
-            ind2.querySelector('div').style.borderColor = 'transparent';
-        });
+                step1.hidden = true;
+                step2.hidden = false;
 
-        btnPrev.addEventListener('click', () => {
-            step2.hidden = true;
-            step1.hidden = false;
+                // Update indicators
+                ind1.style.color = 'var(--text-3)';
+                ind1.querySelector('div').style.background = 'var(--surface-2)';
+                ind1.querySelector('div').style.color = 'inherit';
+                ind1.querySelector('div').style.borderColor = 'var(--border)';
 
-            // Update indicators
-            ind2.style.color = 'var(--text-3)';
-            ind2.querySelector('div').style.background = 'var(--surface-2)';
-            ind2.querySelector('div').style.color = 'inherit';
-            ind2.querySelector('div').style.borderColor = 'var(--border)';
-            
-            ind1.style.color = 'var(--accent)';
-            ind1.querySelector('div').style.background = 'var(--accent)';
-            ind1.querySelector('div').style.color = 'white';
-            ind1.querySelector('div').style.borderColor = 'transparent';
-        });
-    }
-});
+                ind2.style.color = 'var(--accent)';
+                ind2.querySelector('div').style.background = 'var(--accent)';
+                ind2.querySelector('div').style.color = 'white';
+                ind2.querySelector('div').style.borderColor = 'transparent';
+            });
+
+            btnPrev.addEventListener('click', () => {
+                step2.hidden = true;
+                step1.hidden = false;
+
+                // Update indicators
+                ind2.style.color = 'var(--text-3)';
+                ind2.querySelector('div').style.background = 'var(--surface-2)';
+                ind2.querySelector('div').style.color = 'inherit';
+                ind2.querySelector('div').style.borderColor = 'var(--border)';
+
+                ind1.style.color = 'var(--accent)';
+                ind1.querySelector('div').style.background = 'var(--accent)';
+                ind1.querySelector('div').style.color = 'white';
+                ind1.querySelector('div').style.borderColor = 'transparent';
+            });
+        }
+    });
 </script>
 {% endblock %}
