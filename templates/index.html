@@ -194,6 +194,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if(btnNext && btnPrev) {
         btnNext.addEventListener('click', () => {
+            const selectedMode = document.querySelector('input[name="conversion_type"]:checked');
+            const customPrompt = document.getElementById('customPrompt');
+            if (selectedMode && selectedMode.value === 'custom') {
+                if (!customPrompt.value.trim()) {
+                    customPrompt.focus();
+                    customPrompt.reportValidity();
+                    return;
+                }
+            }
+
             step1.hidden = true;
             step2.hidden = false;
             
