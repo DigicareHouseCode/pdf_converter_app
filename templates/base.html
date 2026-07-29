@@ -96,7 +96,7 @@
     </footer>
 
     <script>
-        window.APP_ROOT = "{{ url_for('index') }}".replace(/\/$/, "");
+        window.APP_ROOT = "{{ request.script_root }}";
     </script>
     <script src="{{ url_for('static', filename='js/script.js') }}"></script>
 </body>
