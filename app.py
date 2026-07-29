@@ -75,7 +75,7 @@ login_manager.init_app(app)
 login_manager.login_view = 'login'
 login_manager.login_message = 'Please log in to continue.'
 login_manager.login_message_category = 'error'
-login_manager.session_protection = 'strong'
+login_manager.session_protection = 'basic'
 
 app.register_blueprint(auth_bp, url_prefix='/auth')
 
