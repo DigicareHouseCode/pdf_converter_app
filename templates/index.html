@@ -54,8 +54,8 @@
                     1. Select Conversion Mode
                 </legend>
 
-                <div class="option-cards" style="grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));">
-                    <label class="option-card {% if not is_pro %}pro-locked{% endif %}">
+                <div class="option-cards" style="display: flex; gap: var(--s2); width: 100%;">
+                    <label class="option-card {% if not is_pro %}pro-locked{% endif %}" style="flex: 1;">
                         <input type="radio" name="conversion_type" value="scanned" required {% if not is_pro %}disabled{% endif %} checked>
                         <span class="card-content" style="align-items: center; text-align: center;">
                             {% if not is_pro %}<span class="pro-badge">Pro</span>{% endif %}
@@ -64,7 +64,7 @@
                         </span>
                     </label>
 
-                    <label class="option-card">
+                    <label class="option-card" style="flex: 1;">
                         <input type="radio" name="conversion_type" value="selectable" required>
                         <span class="card-content" style="align-items: center; text-align: center;">
                             {{ icon('cursor', 24) }}
@@ -72,7 +72,7 @@
                         </span>
                     </label>
 
-                    <label class="option-card">
+                    <label class="option-card" style="flex: 1;">
                         <input type="radio" name="conversion_type" value="general" required>
                         <span class="card-content" style="align-items: center; text-align: center;">
                             {{ icon('layers', 24) }}
@@ -80,7 +80,7 @@
                         </span>
                     </label>
 
-                    <label class="option-card {% if not is_pro %}pro-locked{% endif %}">
+                    <label class="option-card {% if not is_pro %}pro-locked{% endif %}" id="customRadioLabel" style="flex: 1;">
                         <input type="radio" name="conversion_type" value="custom" id="customRadio" required {% if not is_pro %}disabled{% endif %}>
                         <span class="card-content" style="align-items: center; text-align: center;">
                             {% if not is_pro %}<span class="pro-badge">Pro</span>{% endif %}
@@ -90,7 +90,7 @@
                     </label>
 
                     {% if checks_enabled %}
-                    <label class="option-card">
+                    <label class="option-card" style="flex: 1;">
                         <input type="radio" name="conversion_type" value="checks" id="checksRadio" required>
                         <span class="card-content" style="align-items: center; text-align: center;">
                             {{ icon('receipt', 24) }}
