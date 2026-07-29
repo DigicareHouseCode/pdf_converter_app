@@ -452,7 +452,7 @@ def format_legal_amount(amount):
         # Fallback for huge numbers
         dollar_words = str(dollars)
         
-    return dollar_words
+    return f"{dollar_words} and {cents:02d}/100"
 
 def validate_checks(rows):
     """
