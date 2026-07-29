@@ -520,7 +520,10 @@ def write_checks_workbook(rows, path, summary):
 
     widths = [14, 13, 30, 15, 40, 20, 45, 30, 45]
     for pos, w in enumerate(widths, start=1):
-        ws.column_dimensions[get_column_letter(pos)].width = w
+        col_dim = ws.column_dimensions[get_column_letter(pos)]
+        col_dim.width = w
+        if pos in (7, 8, 9):
+            col_dim.hidden = True
     ws.freeze_panes = "A2"
 
     # Summary sheet
