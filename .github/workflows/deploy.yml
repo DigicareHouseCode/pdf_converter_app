@@ -1,0 +1,113 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Never let two deploys touch the server at once.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Syntax check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      # Cheap guard: a syntax error should fail here, not on the live server.
+      - name: Byte-compile sources
+        run: python -m compileall -q . -x '^\./(venv|\.git)/'
+
+  deploy:
+    name: Deploy
+    needs: check
+    runs-on: ubuntu-latest
+    env:
+      DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/root/pdf_converter_app' }}
+      SERVICE_NAME: ${{ vars.SERVICE_NAME || 'pdf_converter' }}
+      VENV_PATH: ${{ vars.VENV_PATH || '/root/pdf_converter_app/venv' }}
+      HEALTH_URL: ${{ vars.HEALTH_URL }}
+      SSH_PORT: ${{ secrets.VPS_PORT || '22' }}
+    steps:
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          if [ -n "${{ secrets.VPS_KNOWN_HOSTS }}" ]; then
+            # Pinned host key - protects against MITM.
+            printf '%s\n' "${{ secrets.VPS_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          else
+            # Trust-on-first-use fallback. Set VPS_KNOWN_HOSTS to harden this.
+            ssh-keyscan -p "$SSH_PORT" -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+          fi
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Deploy and restart
+        run: |
+          ssh -i ~/.ssh/deploy_key -p "$SSH_PORT" \
+            "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
+            DEPLOY_PATH="$DEPLOY_PATH" \
+            SERVICE_NAME="$SERVICE_NAME" \
+            VENV_PATH="$VENV_PATH" \
+            SHA="${{ github.sha }}" \
+            'bash -euo pipefail -s' <<'REMOTE'
+          cd "$DEPLOY_PATH"
+
+          # .env is gitignored and lives only on the server. If it vanished,
+          # the app would boot with no DB credentials - stop before restarting.
+          if [ ! -f .env ]; then
+            echo "ERROR: $DEPLOY_PATH/.env is missing. Aborting."
+            exit 1
+          fi
+
+          PREVIOUS=$(git rev-parse HEAD)
+          echo "==> Currently deployed: $(git rev-parse --short HEAD)"
+
+          git fetch --prune origin
+          git reset --hard "$SHA"
+          echo "==> Now deploying:      $(git rev-parse --short HEAD)"
+
+          "$VENV_PATH/bin/pip" install --quiet --disable-pip-version-check -r requirements.txt
+
+          systemctl restart "$SERVICE_NAME"
+          sleep 5
+
+          if ! systemctl is-active --quiet "$SERVICE_NAME"; then
+            echo "==> Service failed to start. Rolling back to $PREVIOUS"
+            journalctl -u "$SERVICE_NAME" -n 60 --no-pager || true
+            git reset --hard "$PREVIOUS"
+            "$VENV_PATH/bin/pip" install --quiet --disable-pip-version-check -r requirements.txt
+            systemctl restart "$SERVICE_NAME"
+            echo "==> Rolled back."
+            exit 1
+          fi
+
+          echo "==> Service is active."
+          REMOTE
+
+      - name: Health check
+        if: env.HEALTH_URL != ''
+        run: |
+          for i in 1 2 3 4 5; do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 "$HEALTH_URL" || echo 000)
+            if [ "$code" = "200" ]; then
+              echo "Health check passed (HTTP $code)"
+              exit 0
+            fi
+            echo "Attempt $i: HTTP $code - retrying in 5s"
+            sleep 5
+          done
+          echo "Health check failed. The service is running but not serving 200."
+          exit 1
+
+      - name: Clean up key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
