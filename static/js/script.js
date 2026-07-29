@@ -110,10 +110,12 @@
                     th.textContent = name;
                     thead.appendChild(th);
                 });
-                // Review column
-                var thR = document.createElement('th');
-                thR.textContent = 'Review';
-                thead.appendChild(thR);
+                // Review column (skip for checks)
+                if (sheetType !== 'checks') {
+                    var thR = document.createElement('th');
+                    thR.textContent = 'Review';
+                    thead.appendChild(thR);
+                }
             }
 
             function render(rows) {
@@ -134,10 +136,12 @@
                         tr.appendChild(cell(val, cls, tr));
                     });
 
-                    var note = document.createElement('td');
-                    note.className = 'cell--note';
-                    note.textContent = row.Review || '';
-                    tr.appendChild(note);
+                    if (sheetType !== 'checks') {
+                        var note = document.createElement('td');
+                        note.className = 'cell--note';
+                        note.textContent = row.Review || '';
+                        tr.appendChild(note);
+                    }
 
                     tbody.appendChild(tr);
                 });
