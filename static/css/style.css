@@ -171,6 +171,74 @@ button, input, textarea, select { font: inherit; color: inherit; }
 }
 .container--narrow { max-width: 460px; }
 .container--mid    { max-width: 760px; }
+.container--wide   { max-width: 1400px; }
+
+/* Grid Layouts */
+.auth-layout {
+    display: grid;
+    grid-template-columns: 1fr;
+    flex: 1;
+}
+@media (min-width: 900px) {
+    .auth-layout { grid-template-columns: 1fr 1.2fr; }
+}
+.auth-brand {
+    background: linear-gradient(135deg, var(--accent), var(--accent-hover));
+    color: var(--on-accent);
+    padding: var(--s6) var(--s5);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    gap: var(--s4);
+}
+.auth-brand h1 { font-size: var(--fs-2xl); color: var(--on-accent); }
+.auth-brand p { font-size: var(--fs-md); max-width: 35ch; opacity: 0.9; }
+.auth-brand svg { margin-bottom: var(--s4); opacity: 0.9; }
+
+.auth-form-wrapper {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--s6) var(--s5);
+    background: var(--bg);
+}
+.auth-form-inner {
+    width: 100%;
+    max-width: 400px;
+    display: flex;
+    flex-direction: column;
+}
+
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--s6);
+    align-items: start;
+}
+@media (min-width: 900px) {
+    .dashboard-grid { grid-template-columns: 1fr 340px; }
+}
+.dashboard-main { display: flex; flex-direction: column; gap: var(--s5); }
+.dashboard-sidebar { display: flex; flex-direction: column; gap: var(--s4); position: sticky; top: calc(var(--nav-h) + var(--s6)); }
+
+.stat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: var(--s4);
+}
+.stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: var(--s4);
+    display: flex;
+    flex-direction: column;
+    gap: var(--s1);
+}
+.stat-card-value { font-size: var(--fs-xl); font-weight: 600; font-family: var(--mono); color: var(--text); }
+.stat-card-label { font-size: var(--fs-sm); color: var(--text-2); display: flex; align-items: center; gap: var(--s2); font-weight: 500; }
 
 .stack   { display: flex; flex-direction: column; gap: var(--s5); }
 .stack-sm{ display: flex; flex-direction: column; gap: var(--s3); }

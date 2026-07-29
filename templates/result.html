@@ -2,6 +2,7 @@
 {% from "_icons.html" import icon %}
 
 {% block title %}Review your data — Excel Automation{% endblock %}
+{% block container_class %}container--wide{% endblock %}
 
 {% block content %}
 <div class="stack" data-task-id="{{ task_id }}" id="reviewRoot">
@@ -21,22 +22,23 @@
             </a>
         </div>
 
-        <div class="detail-list">
-            <div class="detail-row">
-                {{ icon('sheet', 16) }}
-                <span class="detail-label">Rows extracted</span>
-                <span class="detail-value num">{{ row_count if row_count is not none else '—' }}</span>
+        <div class="stat-grid">
+            <div class="stat-card">
+                <span class="stat-card-label">{{ icon('sheet', 16) }} Rows extracted</span>
+                <span class="stat-card-value">{{ row_count if row_count is not none else '—' }}</span>
             </div>
-            <div class="detail-row">
-                {% if flagged_count %}{{ icon('alert', 16) }}{% else %}{{ icon('check-circle', 16) }}{% endif %}
-                <span class="detail-label">Balance check</span>
-                <span class="detail-value">
+            <div class="stat-card">
+                <span class="stat-card-label">
+                    {% if flagged_count %}{{ icon('alert', 16) }}{% else %}{{ icon('check-circle', 16) }}{% endif %}
+                    Balance check
+                </span>
+                <span class="stat-card-value" style="font-size: var(--fs-md); display: flex; align-items: center;">
                     {% if flagged_count %}
-                    {{ flagged_count }} row{{ 's' if flagged_count != 1 }} need review
+                    <span style="color: var(--warning);">{{ flagged_count }} row{{ 's' if flagged_count != 1 }} need review</span>
                     {% elif row_count %}
-                    Running balance reconciles
+                    <span style="color: var(--success);">Running balance reconciles</span>
                     {% else %}
-                    Not available
+                    <span style="color: var(--text-3);">Not available</span>
                     {% endif %}
                 </span>
             </div>

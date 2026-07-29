@@ -2,7 +2,7 @@
 {% from "_icons.html" import icon %}
 
 {% block title %}Convert a PDF — Excel Automation{% endblock %}
-{% block container_class %}container--mid{% endblock %}
+{% block container_class %}container--wide{% endblock %}
 
 {% block content %}
 {% set limit_reached = not is_pro and conversion_count >= conversion_limit %}
@@ -12,48 +12,8 @@
     <p>Upload a bank statement, invoice, or receipt. The extracted data is returned as a formatted Excel workbook.</p>
 </div>
 
-<div class="stack">
-
-    <!-- Usage -->
-    <div class="usage {% if limit_reached %}usage--limit{% endif %}">
-        <div class="usage-block">
-            <span class="usage-label">Plan</span>
-            <span class="usage-value">
-                {% if is_pro %}Professional <span class="badge badge--pro">Pro</span>
-                {% else %}Free{% endif %}
-            </span>
-        </div>
-
-        <div class="usage-block">
-            <span class="usage-label">Conversions used</span>
-            <span class="usage-value num">{{ conversion_count }}{% if not is_pro %} / {{ conversion_limit }}{% endif %}</span>
-        </div>
-
-        {% if is_pro and pro_expiry %}
-        <div class="usage-block">
-            <span class="usage-label">Renews</span>
-            <span class="usage-value num">{{ pro_expiry.strftime('%d %b %Y') }}</span>
-        </div>
-        {% endif %}
-
-        {% if not is_pro %}
-        {% set pct = (conversion_count / conversion_limit * 100) if conversion_limit > 0 else 0 %}
-        <div class="usage-meter" role="img"
-             aria-label="{{ conversion_count }} of {{ conversion_limit }} free conversions used">
-            <div class="usage-meter-fill" style="width: {{ [pct, 100]|min }}%"></div>
-        </div>
-        <a href="{{ url_for('cart') }}" class="btn btn--primary">Upgrade</a>
-        {% endif %}
-    </div>
-
-    {% if limit_reached %}
-    <div class="alert alert-warning" role="status">
-        {{ icon('info', 16) }}
-        <span>You have used all {{ conversion_limit }} free conversions. Upgrade to continue converting.</span>
-    </div>
-    {% elif not is_pro %}
-    <p class="field-hint">The free plan reads the first {{ free_page_limit }} pages of each file.</p>
-    {% endif %}
+<div class="dashboard-grid">
+    <div class="dashboard-main">
 
     <!-- Upload -->
     <form id="uploadForm" class="card upload-card stack" action="{{ url_for('upload_file') }}" method="post"
@@ -199,5 +159,54 @@
             </div>
         </div>
     </form>
+    </div> <!-- end dashboard-main -->
+    
+    <div class="dashboard-sidebar">
+        <!-- Usage -->
+        <div class="usage stack-sm {% if limit_reached %}usage--limit{% endif %}" style="flex-direction: column; align-items: stretch; gap: var(--s4);">
+            <h3 style="font-size: var(--fs-sm); border-bottom: 1px solid var(--border); padding-bottom: var(--s2);">Your Plan</h3>
+            <div class="usage-block">
+                <span class="usage-label">Plan</span>
+                <span class="usage-value">
+                    {% if is_pro %}Professional <span class="badge badge--pro">Pro</span>
+                    {% else %}Free{% endif %}
+                </span>
+            </div>
+
+            <div class="usage-block">
+                <span class="usage-label">Conversions used</span>
+                <span class="usage-value num">{{ conversion_count }}{% if not is_pro %} / {{ conversion_limit }}{% endif %}</span>
+            </div>
+
+            {% if is_pro and pro_expiry %}
+            <div class="usage-block">
+                <span class="usage-label">Renews</span>
+                <span class="usage-value num">{{ pro_expiry.strftime('%d %b %Y') }}</span>
+            </div>
+            {% endif %}
+
+            {% if not is_pro %}
+            {% set pct = (conversion_count / conversion_limit * 100) if conversion_limit > 0 else 0 %}
+            <div class="usage-meter" role="img"
+                 aria-label="{{ conversion_count }} of {{ conversion_limit }} free conversions used">
+                <div class="usage-meter-fill" style="width: {{ [pct, 100]|min }}%"></div>
+            </div>
+            <a href="{{ url_for('cart') }}" class="btn btn--primary btn--block">Upgrade for unlimited</a>
+            {% endif %}
+        </div>
+
+        {% if limit_reached %}
+        <div class="alert alert-warning" role="status">
+            {{ icon('info', 16) }}
+            <span>You have used all {{ conversion_limit }} free conversions. Upgrade to continue converting.</span>
+        </div>
+        {% elif not is_pro %}
+        <div class="alert alert-info">
+            {{ icon('info', 16) }}
+            <span>The free plan reads the first {{ free_page_limit }} pages of each file.</span>
+        </div>
+        {% endif %}
+    </div> <!-- end dashboard-sidebar -->
+
 </div>
 {% endblock %}
