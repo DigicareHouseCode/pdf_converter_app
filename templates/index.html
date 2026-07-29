@@ -134,8 +134,8 @@
                     <input type="file" id="fileInput" name="file" accept=".pdf" required>
                     <label for="fileInput" class="file-input-label" style="min-height: 220px; background: var(--surface-2); border-style: dashed; border-width: 2px;">
                         {{ icon('upload', 40) }}
-                        <span class="file-text" style="font-size: var(--fs-md); font-weight: 500; margin-top: var(--s2);">Choose check images or a PDF</span>
-                        <span class="file-size" style="margin-top: var(--s1);">PNG, JPG, GIF, TIFF or PDF — several at once</span>
+                        <span id="dropzoneText" class="file-text" style="font-size: var(--fs-md); font-weight: 500; margin-top: var(--s2);">Choose a PDF or drag it here</span>
+                        <span id="dropzoneSubtext" class="file-size" style="margin-top: var(--s1);">PDF only</span>
                     </label>
 
                     {% if checks_enabled %}

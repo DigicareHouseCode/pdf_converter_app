@@ -366,6 +366,11 @@
         fileInput.multiple = isChecks;
         fileInput.accept = isChecks ? '.pdf,.png,.jpg,.jpeg,.gif,.tif,.tiff,.webp' : '.pdf';
 
+        var dt = document.getElementById('dropzoneText');
+        var ds = document.getElementById('dropzoneSubtext');
+        if (dt) dt.textContent = isChecks ? 'Choose check images or a PDF' : 'Choose a PDF or drag it here';
+        if (ds) ds.textContent = isChecks ? 'PNG, JPG, GIF, TIFF or PDF — several at once' : 'PDF only';
+
         if (!isChecks && folderFiles.length) {
             folderFiles = [];
             if (folderInput) folderInput.value = '';
@@ -374,7 +379,7 @@
         if (convertBtn && !convertBtn.disabled) {
             var label = isCustom ? 'Convert with my rules'
                 : isChecks ? 'Extract checks to Excel'
-                    : 'Convert to Excel';
+                    : 'Extract to Excel';
             convertBtn.innerHTML = SVG.sparkle + ' ' + label;
         }
 
