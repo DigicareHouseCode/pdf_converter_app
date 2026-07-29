@@ -30,9 +30,9 @@ jobs:
     needs: check
     runs-on: ubuntu-latest
     env:
-      DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/root/pdf_converter_app' }}
-      SERVICE_NAME: ${{ vars.SERVICE_NAME || 'pdf_converter' }}
-      VENV_PATH: ${{ vars.VENV_PATH || '/root/pdf_converter_app/venv' }}
+      DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/var/www/pdf_converter_app' }}
+      SERVICE_NAME: ${{ vars.SERVICE_NAME || 'pdf_app' }}
+      VENV_PATH: ${{ vars.VENV_PATH || '/var/www/pdf_converter_app/venv' }}
       HEALTH_URL: ${{ vars.HEALTH_URL }}
       SSH_PORT: ${{ secrets.VPS_PORT || '22' }}
     steps:
@@ -77,20 +77,32 @@ jobs:
 
           "$VENV_PATH/bin/pip" install --quiet --disable-pip-version-check -r requirements.txt
 
-          systemctl restart "$SERVICE_NAME"
-          sleep 5
+          supervisorctl restart "$SERVICE_NAME"
 
-          if ! systemctl is-active --quiet "$SERVICE_NAME"; then
+          # Check twice with a gap. autorestart=true means a crash-looping app
+          # can read as RUNNING for a moment before dying again.
+          healthy=1
+          for _ in 1 2; do
+            sleep 5
+            if ! supervisorctl status "$SERVICE_NAME" | grep -q RUNNING; then
+              healthy=0
+              break
+            fi
+          done
+
+          if [ "$healthy" -eq 0 ]; then
             echo "==> Service failed to start. Rolling back to $PREVIOUS"
-            journalctl -u "$SERVICE_NAME" -n 60 --no-pager || true
+            supervisorctl status "$SERVICE_NAME" || true
+            supervisorctl tail -2000 "$SERVICE_NAME" stderr || true
             git reset --hard "$PREVIOUS"
             "$VENV_PATH/bin/pip" install --quiet --disable-pip-version-check -r requirements.txt
-            systemctl restart "$SERVICE_NAME"
+            supervisorctl restart "$SERVICE_NAME"
             echo "==> Rolled back."
             exit 1
           fi
 
-          echo "==> Service is active."
+          echo "==> Service is running."
+          supervisorctl status "$SERVICE_NAME"
           REMOTE
 
       - name: Health check

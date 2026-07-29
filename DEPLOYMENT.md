@@ -44,7 +44,7 @@ Your `pdf_converter_app` folder already has the code and, crucially, a live `.en
 gitignored, so `git reset --hard` leaves them alone.
 
 ```bash
-cd /root/pdf_converter_app          # adjust if your path differs
+cd /var/www/pdf_converter_app
 
 cp .env /root/env.backup            # paranoia, in case something goes wrong
 
@@ -60,46 +60,37 @@ ls -la .env && echo ".env survived"
 > `.py` or template directly on the server, copy those changes into the repo and commit them
 > first, or they will be overwritten here and on every future deploy.
 
-## 3. Create the systemd service
+## 3. Supervisor program (already configured)
 
-Skip if you already have one — just note its name for step 5. Otherwise:
+The app runs under supervisor as `pdf_app`:
 
-```bash
-cat > /etc/systemd/system/pdf_converter.service <<'EOF'
-[Unit]
-Description=PDF Converter Flask app
-After=network.target
-
-[Service]
-Type=simple
-User=root
-WorkingDirectory=/root/pdf_converter_app
-EnvironmentFile=/root/pdf_converter_app/.env
-ExecStart=/root/pdf_converter_app/venv/bin/gunicorn \
-    --workers 3 \
-    --bind 127.0.0.1:8000 \
-    --timeout 600 \
-    app:app
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-systemctl daemon-reload
-systemctl enable --now pdf_converter
-systemctl status pdf_converter
+```ini
+[program:pdf_app]
+directory=/var/www/pdf_converter_app
+command=/var/www/pdf_converter_app/venv/bin/gunicorn -w 3 -b 127.0.0.1:8000 app:app
+user=root
+autostart=true
+autorestart=true
+stderr_logfile=/var/log/pdf_app.err.log
+stdout_logfile=/var/log/pdf_app.out.log
 ```
 
-The `--timeout 600` matters: PDF extraction through Gemini can take minutes, and gunicorn's
-default 30s would kill those requests.
+`.env` is picked up because `directory=` makes it the working directory and `app.py` calls
+`load_dotenv()` — no `environment=` needed.
 
-> `EnvironmentFile` does not understand quotes or `#` the way a shell does. Your `.env`
-> contains values with `#` in them (`SECRET_KEY`, `DB_PASSWORD`), which systemd reads
-> literally — that happens to be correct here, but if you ever wrap a value in quotes,
-> systemd will keep the quotes. If this bites you, drop `EnvironmentFile` and let
-> `python-dotenv` load `.env` from `WorkingDirectory` instead.
+**One change worth making:** add `--timeout 600` to the gunicorn command.
+
+```ini
+command=/var/www/pdf_converter_app/venv/bin/gunicorn -w 3 -b 127.0.0.1:8000 --timeout 600 app:app
+```
+
+Gunicorn's default worker timeout is 30 seconds. PDF extraction through Gemini routinely takes
+longer, and when it does, gunicorn kills the worker mid-request — the user sees a truncated
+response or a 502, with nothing obviously wrong in the app logs. Apply it with:
+
+```bash
+supervisorctl reread && supervisorctl update && supervisorctl restart pdf_app
+```
 
 ## 4. Give GitHub Actions SSH access to the VPS
 
@@ -141,9 +132,9 @@ Variables tab — only set these if your paths differ from the defaults:
 
 | Variable | Default |
 |---|---|
-| `DEPLOY_PATH` | `/root/pdf_converter_app` |
-| `SERVICE_NAME` | `pdf_converter` |
-| `VENV_PATH` | `/root/pdf_converter_app/venv` |
+| `DEPLOY_PATH` | `/var/www/pdf_converter_app` |
+| `SERVICE_NAME` | `pdf_app` (the supervisor program name) |
+| `VENV_PATH` | `/var/www/pdf_converter_app/venv` |
 | `HEALTH_URL` | *(unset — health check is skipped)* |
 
 Set `HEALTH_URL` to a real URL (e.g. `https://yourdomain.com/`) to make the deploy verify the
@@ -158,18 +149,21 @@ debugging SSH config and a code change at the same time.
 
 ## Operating notes
 
-**Rollback is automatic.** If `systemctl restart` leaves the service dead, the workflow resets
-to the previous commit, reinstalls, restarts, dumps the last 60 journal lines into the Actions
-log, and fails the run. The site stays up on the old code.
+**Rollback is automatic.** If the program isn't `RUNNING` after restart, the workflow resets
+to the previous commit, reinstalls, restarts, dumps the tail of `pdf_app` stderr into the
+Actions log, and fails the run. The site stays up on the old code.
 
 **Rolling back by hand:**
 
 ```bash
-cd /root/pdf_converter_app
+cd /var/www/pdf_converter_app
 git reset --hard <old-sha>
 venv/bin/pip install -r requirements.txt
-systemctl restart pdf_converter
+supervisorctl restart pdf_app
 ```
+
+**Reading logs:** `supervisorctl tail -f pdf_app stderr`, or directly at
+`/var/log/pdf_app.err.log` and `/var/log/pdf_app.out.log`.
 
 Note the next push to `main` will move the server back to the tip of `main`. To undo a bad
 commit properly, `git revert` it and push.
