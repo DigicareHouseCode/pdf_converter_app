@@ -439,6 +439,40 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .file-text { font-weight: 550; color: var(--text); word-break: break-all; }
 .file-size { font-size: var(--fs-xs); color: var(--text-3); font-family: var(--mono); }
 
+.upload-extra {
+    display: flex;
+    align-items: center;
+    gap: var(--s3);
+    flex-wrap: wrap;
+    margin-top: var(--s3);
+}
+
+.file-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--s2);
+    margin-top: var(--s3);
+    max-height: 132px;
+    overflow-y: auto;
+}
+.file-chip {
+    display: inline-block;
+    max-width: 30ch;
+    padding: 0.15rem 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    font-family: var(--mono);
+    font-size: var(--fs-xs);
+    color: var(--text-2);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    direction: rtl;      /* keep the filename visible when the path is long */
+    text-align: left;
+}
+.file-chip--more { direction: ltr; color: var(--text-3); border-style: dashed; }
+
 /* ---------- conversion mode picker ---------- */
 
 .field-label {

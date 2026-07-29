@@ -188,6 +188,21 @@
 
     if (!uploadForm) return;
 
+    var folderInput = document.getElementById('folderInput');
+    var folderBtn = document.getElementById('folderBtn');
+    var uploadExtra = document.getElementById('uploadExtra');
+    var fileList = document.getElementById('fileList');
+    var maxChecks = parseInt(uploadForm.dataset.maxChecks || '300', 10);
+
+    // Files chosen via the folder picker, kept aside because a file input's
+    // FileList cannot be merged with another one.
+    var folderFiles = [];
+
+    function isChecksMode() {
+        var selected = document.querySelector('input[name="conversion_type"]:checked');
+        return !!selected && selected.value === 'checks';
+    }
+
     function setLabel(name, sizeText, selected) {
         fileLabel.innerHTML =
             (selected ? SVG.file : SVG.upload) +
@@ -197,18 +212,80 @@
     }
 
     function resetLabel() {
-        setLabel('Choose a PDF or drag it here', 'PDF only', false);
+        if (isChecksMode()) {
+            setLabel('Choose check images or a PDF', 'PNG, JPG, GIF, TIFF or PDF — several at once', false);
+        } else {
+            setLabel('Choose a PDF or drag it here', 'PDF only', false);
+        }
+    }
+
+    function chosenFiles() {
+        var picked = fileInput.files ? Array.prototype.slice.call(fileInput.files) : [];
+        return isChecksMode() ? picked.concat(folderFiles) : picked.slice(0, 1);
+    }
+
+    function totalMB(files) {
+        var bytes = files.reduce(function (sum, f) { return sum + f.size; }, 0);
+        return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+    }
+
+    function renderFileList(files) {
+        if (!fileList) return;
+        if (!isChecksMode() || files.length < 2) {
+            fileList.hidden = true;
+            fileList.textContent = '';
+            return;
+        }
+        fileList.textContent = '';
+        files.slice(0, 12).forEach(function (f) {
+            var row = document.createElement('span');
+            row.className = 'file-chip';
+            row.textContent = f.webkitRelativePath || f.name;
+            fileList.appendChild(row);
+        });
+        if (files.length > 12) {
+            var more = document.createElement('span');
+            more.className = 'file-chip file-chip--more';
+            more.textContent = '+' + (files.length - 12) + ' more';
+            fileList.appendChild(more);
+        }
+        fileList.hidden = false;
+    }
+
+    function syncSelection() {
+        var files = chosenFiles();
+
+        if (!files.length) {
+            resetLabel();
+            renderFileList([]);
+            return;
+        }
+
+        if (isChecksMode() && files.length > 1) {
+            setLabel(files.length + ' files selected', totalMB(files), true);
+        } else {
+            setLabel(files[0].name, (files[0].size / 1024 / 1024).toFixed(1) + ' MB', true);
+        }
+
+        renderFileList(files);
+        removeError();
     }
 
     if (fileInput) {
         fileInput.addEventListener('change', function () {
-            if (this.files.length) {
-                var f = this.files[0];
-                setLabel(f.name, (f.size / 1024 / 1024).toFixed(1) + ' MB', true);
-                removeError();
-            } else {
-                resetLabel();
-            }
+            folderFiles = [];          // a fresh pick replaces any folder choice
+            syncSelection();
+        });
+    }
+
+    if (folderBtn && folderInput) {
+        folderBtn.addEventListener('click', function () { folderInput.click(); });
+        folderInput.addEventListener('change', function () {
+            folderFiles = Array.prototype.slice.call(this.files).filter(function (f) {
+                return /\.(pdf|png|jpe?g|gif|tiff?|webp)$/i.test(f.name);
+            });
+            if (fileInput.value) fileInput.value = '';   // folder choice wins
+            syncSelection();
         });
     }
 
@@ -235,14 +312,33 @@
         });
     }
 
-    /* custom mode */
+    /* mode switching */
     function syncMode() {
         var selected = document.querySelector('input[name="conversion_type"]:checked');
-        var isCustom = selected && selected.value === 'custom';
+        var mode = selected ? selected.value : '';
+        var isCustom = mode === 'custom';
+        var isChecks = mode === 'checks';
+
         if (promptSection) promptSection.hidden = !isCustom;
-        if (convertBtn && !convertBtn.disabled) {
-            convertBtn.innerHTML = SVG.sparkle + ' ' + (isCustom ? 'Convert with my rules' : 'Convert to Excel');
+        if (uploadExtra) uploadExtra.hidden = !isChecks;
+
+        // Only checks mode takes a batch.
+        fileInput.multiple = isChecks;
+        fileInput.accept = isChecks ? '.pdf,.png,.jpg,.jpeg,.gif,.tif,.tiff,.webp' : '.pdf';
+
+        if (!isChecks && folderFiles.length) {
+            folderFiles = [];
+            if (folderInput) folderInput.value = '';
         }
+
+        if (convertBtn && !convertBtn.disabled) {
+            var label = isCustom ? 'Convert with my rules'
+                : isChecks ? 'Extract checks to Excel'
+                    : 'Convert to Excel';
+            convertBtn.innerHTML = SVG.sparkle + ' ' + label;
+        }
+
+        syncSelection();
     }
     document.querySelectorAll('input[name="conversion_type"]').forEach(function (r) {
         r.addEventListener('change', syncMode);
@@ -274,14 +370,33 @@
         e.preventDefault();
 
         var selected = document.querySelector('input[name="conversion_type"]:checked');
+        var files = chosenFiles();
 
-        if (!fileInput.files.length) { return showError('Choose a PDF file to convert.'); }
         if (!selected) { return showError('Pick a conversion mode.'); }
+        if (!files.length) {
+            return showError(isChecksMode()
+                ? 'Choose the check images or PDF you want to read.'
+                : 'Choose a PDF file to convert.');
+        }
+        if (isChecksMode() && files.length > maxChecks) {
+            return showError('That is ' + files.length + ' files. Upload at most ' + maxChecks + ' at a time.');
+        }
         if (selected.value === 'custom' && !promptField.value.trim()) {
             showError('Describe the columns you want extracted.');
             promptField.focus();
             return;
         }
+
+        // Build the payload by hand: files may come from either input, and the
+        // relative path of each one has to travel alongside it.
+        var payload = new FormData();
+        payload.append('csrf_token', uploadForm.querySelector('[name="csrf_token"]').value);
+        payload.append('conversion_type', selected.value);
+        if (promptField) payload.append('custom_prompt', promptField.value);
+        files.forEach(function (f) {
+            payload.append('file', f, f.name);
+            payload.append('relative_paths', f.webkitRelativePath || f.name);
+        });
 
         processingPanel.classList.add('is-active');
         convertBtn.disabled = true;
@@ -289,7 +404,7 @@
 
         fetch(this.action, {
             method: 'POST',
-            body: new FormData(this),
+            body: payload,
             headers: { 'X-Requested-With': 'XMLHttpRequest' }
         })
             .then(function (res) {

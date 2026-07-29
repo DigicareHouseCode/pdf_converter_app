@@ -57,7 +57,8 @@
 
     <!-- Upload -->
     <form id="uploadForm" class="card upload-card stack" action="{{ url_for('upload_file') }}" method="post"
-          enctype="multipart/form-data">
+          enctype="multipart/form-data"
+          data-max-checks="{{ max_check_files }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
         <div class="file-input-container">
@@ -67,6 +68,19 @@
                 <span class="file-text">Choose a PDF or drag it here</span>
                 <span class="file-size">PDF only</span>
             </label>
+
+            {% if checks_enabled %}
+            <!-- Folder picker, shown only in checks mode. Browsers expose the
+                 relative path in JS only, so it is sent alongside as a field. -->
+            <input type="file" id="folderInput" webkitdirectory directory multiple hidden>
+            <div class="upload-extra" id="uploadExtra" hidden>
+                <button type="button" class="btn btn--secondary" id="folderBtn">
+                    {{ icon('layers', 16) }} Upload a whole folder
+                </button>
+                <span class="field-hint">Keeps the company and month folders with each check.</span>
+            </div>
+            <div class="file-list" id="fileList" hidden></div>
+            {% endif %}
         </div>
 
         <fieldset style="border:0;">
@@ -115,6 +129,17 @@
                         <p>Define your own columns</p>
                     </span>
                 </label>
+
+                {% if checks_enabled %}
+                <label class="option-card">
+                    <input type="radio" name="conversion_type" value="checks" id="checksRadio" required>
+                    <span class="card-content">
+                        {{ icon('receipt', 19) }}
+                        <h4>Checks</h4>
+                        <p>Images or a PDF of checks</p>
+                    </span>
+                </label>
+                {% endif %}
             </div>
         </fieldset>
 

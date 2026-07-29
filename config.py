@@ -59,7 +59,17 @@ class Config:
     UPLOAD_FOLDER = 'uploads'
     OUTPUT_FOLDER = 'outputs'
     ALLOWED_EXTENSIONS = {'pdf'}
+    # Check images arrive as scans or bank exports, so accept the formats banks
+    # actually emit. GIF is common for cheque images from older core systems.
+    ALLOWED_IMAGE_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'tif', 'tiff', 'webp'}
+    CHECK_UPLOAD_EXTENSIONS = ALLOWED_EXTENSIONS | ALLOWED_IMAGE_EXTENSIONS
     MAX_CONTENT_LENGTH = None  # Removed file size limit as requested
+
+    # Checks mode. Off until the extractor ships, so the card is not offered
+    # to users as a control that cannot yet do anything.
+    CHECKS_ENABLED = os.environ.get('CHECKS_ENABLED', 'false').lower() == 'true'
+    # Upper bound on one batch: each check image is a separate vision call.
+    MAX_CHECK_FILES = int(os.environ.get('MAX_CHECK_FILES', 300))
 
     # Set GEMINI_API_KEY in your .env file (see .env.example)
     API_KEY = os.environ.get('GEMINI_API_KEY', "")

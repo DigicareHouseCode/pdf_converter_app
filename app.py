@@ -95,8 +95,33 @@ def inject_globals():
     return {'now': datetime.utcnow()}
 
 
-def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
+def file_extension(filename):
+    return filename.rsplit('.', 1)[1].lower() if '.' in filename else ''
+
+
+def allowed_file(filename, conversion_type=None):
+    """Checks mode also accepts image formats; every other mode is PDF only."""
+    permitted = (app.config['CHECK_UPLOAD_EXTENSIONS'] if conversion_type == 'checks'
+                 else app.config['ALLOWED_EXTENSIONS'])
+    return file_extension(filename) in permitted
+
+
+def safe_relative_path(raw):
+    """
+    Turn a browser-supplied relative path into a safe one.
+
+    Folder uploads report paths like "49 UNITED INC/JUNE 2026/1361.png". Each
+    segment is sanitised individually so the company and month survive while
+    traversal ("../") cannot.
+    """
+    if not raw:
+        return None
+    segments = []
+    for segment in str(raw).replace('\\', '/').split('/'):
+        segment = secure_filename(segment)
+        if segment and segment not in ('.', '..'):
+            segments.append(segment)
+    return '/'.join(segments) if segments else None
 
 
 def ensure_directories():
@@ -153,6 +178,8 @@ def dashboard():
         conversion_count=conversion_count,
         conversion_limit=app.config.get('FREE_CONVERSION_LIMIT', 3),
         free_page_limit=app.config.get('FREE_PAGE_LIMIT', 5),
+        checks_enabled=app.config.get('CHECKS_ENABLED', False),
+        max_check_files=app.config.get('MAX_CHECK_FILES', 300),
         is_pro=current_user.is_pro,
         pro_expiry=current_user.pro_expiry,
     )
@@ -444,14 +471,11 @@ def upload_file():
     if not current_user.is_pro and conversion_count >= limit:
         return fail(f'You have used all {limit} free conversions. Upgrade to continue.')
 
-    file = request.files.get('file')
-    if not file or not file.filename:
-        return fail('Choose a PDF file to convert.')
-    if not allowed_file(file.filename):
-        return fail('Only PDF files can be converted.')
-
     conversion_type = request.form.get('conversion_type')
-    if conversion_type not in {'scanned', 'selectable', 'general', 'custom'}:
+    valid_modes = {'scanned', 'selectable', 'general', 'custom'}
+    if app.config.get('CHECKS_ENABLED'):
+        valid_modes.add('checks')
+    if conversion_type not in valid_modes:
         return fail('Pick a conversion mode.')
 
     pro_types = app.config.get('PRO_CONVERSION_TYPES', set())
@@ -462,31 +486,83 @@ def upload_file():
     if conversion_type == 'custom' and not custom_prompt:
         return fail('Describe what you want extracted.')
 
+    # Checks mode takes a batch; every other mode takes one PDF.
+    uploaded = [f for f in request.files.getlist('file') if f and f.filename]
+    if not uploaded:
+        return fail('Choose a file to convert.')
+
+    if conversion_type == 'checks':
+        limit = app.config.get('MAX_CHECK_FILES', 300)
+        if len(uploaded) > limit:
+            return fail(f'That is {len(uploaded)} files. Please upload at most {limit} at a time.')
+    else:
+        uploaded = uploaded[:1]
+
+    for item in uploaded:
+        if not allowed_file(item.filename, conversion_type):
+            what = ('PDFs and image files' if conversion_type == 'checks' else 'PDF files')
+            return fail(f'{item.filename} is not supported. Only {what} can be converted.')
+
     ensure_directories()
 
     file_id = str(uuid.uuid4())
-    original_filename = secure_filename(file.filename) or 'document.pdf'
-    upload_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{file_id}_{original_filename}")
-    output_filename = f"{file_id}_{os.path.splitext(original_filename)[0]}.xlsx"
-    output_path = os.path.join(app.config['OUTPUT_FOLDER'], output_filename)
-
-    file.save(upload_path)
-
     max_pages = None if current_user.is_pro else app.config.get('FREE_PAGE_LIMIT', 5)
 
-    if not current_user.is_pro:
-        try:
-            import pdfplumber
-            with pdfplumber.open(upload_path) as pdf:
-                pages = len(pdf.pages)
-            if pages > max_pages:
-                os.remove(upload_path)
-                return fail(
-                    f'The free plan reads up to {max_pages} pages. This file has {pages}. '
-                    f'Upgrade for unlimited pages.'
-                )
-        except Exception:
-            log.warning("Could not count pages in %s; converter will apply the limit.", original_filename)
+    if conversion_type == 'checks':
+        # A batch keeps its own directory so the folder structure a user
+        # uploaded (company / month / check) survives to the extractor.
+        if not current_user.is_pro and len(uploaded) > max_pages:
+            return fail(
+                f'The free plan converts up to {max_pages} checks at a time. '
+                f'You selected {len(uploaded)}. Upgrade for unlimited batches.'
+            )
+
+        upload_path = os.path.join(app.config['UPLOAD_FOLDER'], file_id)
+        os.makedirs(upload_path, exist_ok=True)
+
+        raw_paths = request.form.getlist('relative_paths')
+        saved = 0
+        for index, item in enumerate(uploaded):
+            relative = safe_relative_path(raw_paths[index]) if index < len(raw_paths) else None
+            relative = relative or secure_filename(item.filename)
+            if not relative:
+                continue
+            destination = os.path.join(upload_path, relative)
+            os.makedirs(os.path.dirname(destination), exist_ok=True)
+            item.save(destination)
+            saved += 1
+
+        if not saved:
+            return fail('None of those files could be read.')
+
+        original_filename = (f"{saved} checks" if saved > 1
+                             else secure_filename(uploaded[0].filename))
+        output_filename = f"{file_id}_checks.xlsx"
+        log.info("Checks batch %s: %d file(s) staged", file_id[:8], saved)
+
+    else:
+        file = uploaded[0]
+        original_filename = secure_filename(file.filename) or 'document.pdf'
+        upload_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{file_id}_{original_filename}")
+        output_filename = f"{file_id}_{os.path.splitext(original_filename)[0]}.xlsx"
+        file.save(upload_path)
+
+        if not current_user.is_pro:
+            try:
+                import pdfplumber
+                with pdfplumber.open(upload_path) as pdf:
+                    pages = len(pdf.pages)
+                if pages > max_pages:
+                    os.remove(upload_path)
+                    return fail(
+                        f'The free plan reads up to {max_pages} pages. This file has {pages}. '
+                        f'Upgrade for unlimited pages.'
+                    )
+            except Exception:
+                log.warning("Could not count pages in %s; converter will apply the limit.",
+                            original_filename)
+
+    output_path = os.path.join(app.config['OUTPUT_FOLDER'], output_filename)
 
     task_id = str(uuid.uuid4())
     db.session.add(TaskProgress(
@@ -525,7 +601,11 @@ def run_conversion(task_id, user_id, original_filename, upload_path,
 
         try:
             log.info("[%s] %s mode, file=%s", task_id[:8], conversion_type, original_filename)
-            if conversion_type == 'custom':
+            if conversion_type == 'checks':
+                # Phase 2 replaces this with converters.checks_converter.
+                success, message, summary = False, (
+                    'Check extraction is not available yet.'), None
+            elif conversion_type == 'custom':
                 success, message, summary = convert_custom(
                     upload_path, output_path, app.config['API_KEY'], custom_prompt,
                     max_pages=max_pages, progress_callback=progress)
@@ -564,11 +644,15 @@ def run_conversion(task_id, user_id, original_filename, upload_path,
             log.exception("[%s] could not record result", task_id[:8])
             db.session.rollback()
         finally:
-            if os.path.exists(upload_path):
-                try:
+            # A checks batch is a directory; every other mode is one file.
+            try:
+                if os.path.isdir(upload_path):
+                    import shutil
+                    shutil.rmtree(upload_path, ignore_errors=True)
+                elif os.path.exists(upload_path):
                     os.remove(upload_path)
-                except OSError:
-                    log.warning("Could not delete upload %s", upload_path)
+            except OSError:
+                log.warning("Could not delete upload %s", upload_path)
 
 
 @app.route('/progress/<task_id>')
@@ -740,12 +824,19 @@ def purge_expired_outputs():
             return
 
         # Uploads are removed after each conversion; anything left is an orphan.
+        # Checks batches are directories, so sweep both shapes.
         upload_dir = app.config['UPLOAD_FOLDER']
         if os.path.isdir(upload_dir):
+            import shutil
             for name in os.listdir(upload_dir):
                 path = os.path.join(upload_dir, name)
                 try:
-                    if os.path.isfile(path) and datetime.utcfromtimestamp(os.path.getmtime(path)) < cutoff:
+                    if datetime.utcfromtimestamp(os.path.getmtime(path)) >= cutoff:
+                        continue
+                    if os.path.isdir(path):
+                        shutil.rmtree(path, ignore_errors=True)
+                        removed_files += 1
+                    elif os.path.isfile(path):
                         os.remove(path)
                         removed_files += 1
                 except OSError:
