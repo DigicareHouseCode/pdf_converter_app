@@ -57,7 +57,7 @@ For each check extract these fields EXACTLY:
 {
   "check_number":    "printed check number, usually top-right corner",
   "date":            "date exactly as written on the check",
-  "payee":           "PAY TO THE ORDER OF line",
+  "payee":           "PAY TO THE ORDER OF line (EXCLUDE any address or location info, e.g., if 'ASGHAR ALI 3112 LONE PINE...' is printed, just extract 'ASGHAR ALI')",
   "courtesy_amount": "numeric dollar amount from the box (e.g. 574.25)",
   "legal_amount":    "the written-out dollar amount on the DOLLARS line, transcribed exactly as handwritten",
   "memo":            "FOR / memo line content",
