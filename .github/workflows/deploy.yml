@@ -29,6 +29,10 @@ jobs:
     name: Deploy
     needs: check
     runs-on: ubuntu-latest
+    # GITHUB_TOKEN is forwarded to the server so it can fetch this private
+    # repo. It expires when the job ends, so nothing durable is stored there.
+    permissions:
+      contents: read
     env:
       DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/var/www/pdf_converter_app' }}
       SERVICE_NAME: ${{ vars.SERVICE_NAME || 'pdf_app' }}
@@ -51,14 +55,21 @@ jobs:
           chmod 600 ~/.ssh/known_hosts
 
       - name: Deploy and restart
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
         run: |
-          ssh -i ~/.ssh/deploy_key -p "$SSH_PORT" \
-            "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
-            DEPLOY_PATH="$DEPLOY_PATH" \
-            SERVICE_NAME="$SERVICE_NAME" \
-            VENV_PATH="$VENV_PATH" \
-            SHA="${{ github.sha }}" \
-            'bash -euo pipefail -s' <<'REMOTE'
+          # Config goes in over stdin rather than argv, so the token never
+          # shows up in the server's process list.
+          {
+            echo "export DEPLOY_PATH='$DEPLOY_PATH'"
+            echo "export SERVICE_NAME='$SERVICE_NAME'"
+            echo "export VENV_PATH='$VENV_PATH'"
+            echo "export REPO='$REPO'"
+            echo "export SHA='$SHA'"
+            echo "export GH_TOKEN='$GH_TOKEN'"
+            cat <<'REMOTE'
           cd "$DEPLOY_PATH"
 
           # .env is gitignored and lives only on the server. If it vanished,
@@ -68,11 +79,32 @@ jobs:
             exit 1
           fi
 
-          PREVIOUS=$(git rev-parse HEAD)
-          echo "==> Currently deployed: $(git rev-parse --short HEAD)"
+          git config --global --add safe.directory "$DEPLOY_PATH" 2>/dev/null || true
 
-          git fetch --prune origin
-          git reset --hard "$SHA"
+          # First deploy: adopt the existing directory as a working tree.
+          if [ ! -d .git ]; then
+            echo "==> First deploy: initializing git repo in $DEPLOY_PATH"
+            echo "==> Tracked files will be replaced by the repo's versions."
+            echo "==> .env, uploads/, outputs/, instance/ are gitignored and stay as they are."
+            git init -q -b main
+            git remote add origin "https://github.com/$REPO.git"
+          fi
+
+          # Credentials are passed inline per fetch, so none are written to
+          # .git/config or any credential store on the server.
+          git fetch -q --prune \
+            "https://x-access-token:$GH_TOKEN@github.com/$REPO.git" \
+            "+refs/heads/main:refs/remotes/origin/main"
+
+          if git rev-parse --verify -q HEAD >/dev/null; then
+            PREVIOUS=$(git rev-parse HEAD)
+            echo "==> Currently deployed: $(git rev-parse --short HEAD)"
+          else
+            PREVIOUS=""
+            echo "==> Currently deployed: (none, this is the first deploy)"
+          fi
+
+          git reset -q --hard "$SHA"
           echo "==> Now deploying:      $(git rev-parse --short HEAD)"
 
           "$VENV_PATH/bin/pip" install --quiet --disable-pip-version-check -r requirements.txt
@@ -91,19 +123,27 @@ jobs:
           done
 
           if [ "$healthy" -eq 0 ]; then
-            echo "==> Service failed to start. Rolling back to $PREVIOUS"
+            echo "==> Service is not running after restart."
             supervisorctl status "$SERVICE_NAME" || true
             supervisorctl tail -2000 "$SERVICE_NAME" stderr || true
-            git reset --hard "$PREVIOUS"
-            "$VENV_PATH/bin/pip" install --quiet --disable-pip-version-check -r requirements.txt
-            supervisorctl restart "$SERVICE_NAME"
-            echo "==> Rolled back."
+            if [ -n "$PREVIOUS" ]; then
+              echo "==> Rolling back to $PREVIOUS"
+              git reset -q --hard "$PREVIOUS"
+              "$VENV_PATH/bin/pip" install --quiet --disable-pip-version-check -r requirements.txt
+              supervisorctl restart "$SERVICE_NAME"
+              echo "==> Rolled back."
+            else
+              echo "==> No previous commit to roll back to; leaving as is."
+            fi
             exit 1
           fi
 
           echo "==> Service is running."
           supervisorctl status "$SERVICE_NAME"
           REMOTE
+          } | ssh -i ~/.ssh/deploy_key -p "$SSH_PORT" \
+                "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
+                'bash -euo pipefail -s'
 
       - name: Health check
         if: env.HEALTH_URL != ''

@@ -4,63 +4,17 @@ Pushing to `main` triggers [.github/workflows/deploy.yml](.github/workflows/depl
 into the VPS, pulls the new commit, reinstalls dependencies, and restarts the service. If the
 service fails to come up, the deploy automatically rolls back to the previous commit.
 
-The steps below are **one-time setup**. Run them on the VPS as `root` unless noted.
+**There is no manual setup to do on the VPS.** The first deploy bootstraps the server itself:
+it detects that `/var/www/pdf_converter_app` isn't a git repo, runs `git init`, adds the
+remote, and adopts the existing directory as a working tree. No deploy key is needed — the
+workflow forwards its own `GITHUB_TOKEN`, which expires when the job ends, so no credential is
+ever stored on the server or written into `.git/config`.
+
+The only configuration lives in the repo settings (section 2).
 
 ---
 
-## 1. Let the VPS pull from the private repo (deploy key)
-
-The repo is private, so the server needs its own read-only key.
-
-```bash
-ssh-keygen -t ed25519 -C "vps-deploy" -f ~/.ssh/github_deploy -N ""
-cat ~/.ssh/github_deploy.pub
-```
-
-Copy that public key into GitHub:
-**Repo → Settings → Deploy keys → Add deploy key**. Paste it, name it `vps`, and leave
-*Allow write access* **unchecked**.
-
-Tell SSH to use it for GitHub:
-
-```bash
-cat >> ~/.ssh/config <<'EOF'
-Host github.com
-    HostName github.com
-    User git
-    IdentityFile ~/.ssh/github_deploy
-    IdentitiesOnly yes
-EOF
-chmod 600 ~/.ssh/config
-
-# Verify - expect "successfully authenticated, but GitHub does not provide shell access"
-ssh -T git@github.com
-```
-
-## 2. Turn the existing folder into a git clone
-
-Your `pdf_converter_app` folder already has the code and, crucially, a live `.env`, plus
-`uploads/` and `outputs/`. This attaches git history **without touching those** — they are
-gitignored, so `git reset --hard` leaves them alone.
-
-```bash
-cd /var/www/pdf_converter_app
-
-cp .env /root/env.backup            # paranoia, in case something goes wrong
-
-git init -b main
-git remote add origin git@github.com:DigicareHouseCode/pdf_converter_app.git
-git fetch origin
-git reset --hard origin/main
-
-ls -la .env && echo ".env survived"
-```
-
-> `git reset --hard` discards uncommitted edits to **tracked** files. If you hand-edited any
-> `.py` or template directly on the server, copy those changes into the repo and commit them
-> first, or they will be overwritten here and on every future deploy.
-
-## 3. Supervisor program (already configured)
+## 1. Supervisor program (already configured)
 
 The app runs under supervisor as `pdf_app`:
 
@@ -92,9 +46,9 @@ response or a 502, with nothing obviously wrong in the app logs. Apply it with:
 supervisorctl reread && supervisorctl update && supervisorctl restart pdf_app
 ```
 
-## 4. Give GitHub Actions SSH access to the VPS
+## 2. GitHub Actions SSH access to the VPS
 
-Generate a **separate** keypair for CI (do this on your local machine or the VPS):
+Generate a keypair for CI (do this on your local machine or the VPS):
 
 ```bash
 ssh-keygen -t ed25519 -C "github-actions" -f ~/.ssh/gha_deploy -N ""
@@ -107,14 +61,14 @@ cat ~/.ssh/gha_deploy.pub >> /root/.ssh/authorized_keys
 chmod 600 /root/.ssh/authorized_keys
 ```
 
-Then get the values for step 5:
+Then get the values for the next section:
 
 ```bash
 cat ~/.ssh/gha_deploy        # -> VPS_SSH_KEY (the whole thing, BEGIN/END lines included)
 ssh-keyscan -H <your-vps-ip> # -> VPS_KNOWN_HOSTS
 ```
 
-## 5. Configure the repo
+## 3. Configure the repo
 
 **Repo → Settings → Secrets and variables → Actions**
 
@@ -140,10 +94,16 @@ Variables tab — only set these if your paths differ from the defaults:
 Set `HEALTH_URL` to a real URL (e.g. `https://yourdomain.com/`) to make the deploy verify the
 site actually responds with 200, not just that the process is alive.
 
-## 6. Test it
+## 4. Test it
 
 Trigger a run manually first: **Actions → Deploy to VPS → Run workflow**. That way you're not
 debugging SSH config and a code change at the same time.
+
+On the very first run you'll see `First deploy: initializing git repo`. That run replaces
+every **tracked** file with the repo's version. `.env`, `uploads/`, `outputs/`, and
+`instance/` are gitignored and are left exactly as they are — but if you hand-edited any `.py`
+or template directly on the server, those edits are overwritten. Get them into the repo first
+if you want to keep them.
 
 ---
 
