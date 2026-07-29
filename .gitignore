@@ -1,0 +1,40 @@
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+venv/
+.venv/
+
+# Flask / DB
+instance/
+*.db
+*.sqlite3
+
+# Runtime data
+uploads/
+outputs/
+quickbooks_companies/
+
+# Debug / scratch artifacts
+debug_lines.txt
+error_response.txt
+extracted_text_complete.txt
+extracted_text_debug.txt
+gemini_extracted.json
+gemini_extracted_all.json
+ai_extraction.json
+
+# Editors / tooling
+.idea/
+.vscode/
+.claude/
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store

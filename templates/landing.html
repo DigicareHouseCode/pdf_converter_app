@@ -1,0 +1,990 @@
+{% extends "base.html" %}
+
+{% block content %}
+<!-- Enhanced Landing Page Styles -->
+<style>
+    /* Dynamic Background - Light Mode with Grid Pattern */
+    body {
+        background-color: #f8fafc;
+        /* Subtle Grid Pattern */
+        background-image:
+            linear-gradient(#e2e8f0 1px, transparent 1px),
+            linear-gradient(90deg, #e2e8f0 1px, transparent 1px);
+        background-size: 40px 40px;
+        color: #1e293b;
+        /* Dark text for body */
+        overflow-x: hidden;
+    }
+
+    /* Keyframes */
+    @keyframes gradient-animation {
+        0% {
+            background-position: 0% 50%;
+        }
+
+        50% {
+            background-position: 100% 50%;
+        }
+
+        100% {
+            background-position: 0% 50%;
+        }
+    }
+
+    @keyframes fadeIn {
+        from {
+            opacity: 0;
+            transform: translateY(20px);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    @keyframes float {
+        0% {
+            transform: translateY(0px);
+        }
+
+        50% {
+            transform: translateY(-10px);
+        }
+
+        100% {
+            transform: translateY(0px);
+        }
+    }
+
+    /* Global Tweaks */
+    .landing-container {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 0 1.5rem;
+        position: relative;
+        z-index: 10;
+        opacity: 1 !important;
+    }
+
+    /* Hero Section */
+    .landing-hero {
+        text-align: center;
+        padding: 8rem 1rem 6rem;
+        position: relative;
+        z-index: 1;
+        /* Above particles */
+    }
+
+    .landing-hero h1 {
+        font-size: 4rem;
+        font-weight: 800;
+        margin-bottom: 1.5rem;
+        /* Bold Dark Headings */
+        color: #0f172a;
+        background: none;
+        -webkit-text-fill-color: initial;
+        line-height: 1.1;
+        letter-spacing: -1px;
+        animation: fadeIn 0.8s ease-out forwards;
+        /* Subtle shadow for depth on light bg */
+        text-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+    }
+
+    .landing-hero p {
+        font-size: 1.35rem;
+        /* Darker gray for readability on light bg */
+        color: #475569 !important;
+        max-width: 750px;
+        margin: 0 auto 3rem;
+        line-height: 1.7;
+        animation: fadeIn 0.8s ease-out 0.2s forwards;
+    }
+
+    .cta-buttons {
+        display: flex;
+        justify-content: center;
+        gap: 1.5rem;
+        animation: fadeIn 0.8s ease-out 0.4s backwards;
+    }
+
+    .cta-primary {
+        background: #4f46e5;
+        color: white;
+        padding: 1rem 2.5rem;
+        border-radius: 50px;
+        /* Fully rounded */
+        font-weight: 600;
+        font-size: 1.15rem;
+        text-decoration: none;
+        transition: all 0.3s ease;
+        box-shadow: 0 10px 20px rgba(79, 70, 229, 0.3);
+        border: none;
+        display: inline-block;
+    }
+
+    .cta-primary:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 15px 30px rgba(79, 70, 229, 0.4);
+    }
+
+    .cta-secondary {
+        background: rgba(255, 255, 255, 0.8);
+        color: #1e293b;
+        padding: 1rem 2.5rem;
+        border-radius: 50px;
+        font-weight: 600;
+        font-size: 1.15rem;
+        text-decoration: none;
+        transition: all 0.3s ease;
+        border: 1px solid #e2e8f0;
+        backdrop-filter: blur(10px);
+        display: inline-block;
+    }
+
+    .cta-secondary:hover {
+        background: white;
+        border-color: #4f46e5;
+        color: #4f46e5;
+        transform: translateY(-4px);
+        box-shadow: 0 5px 15px rgba(0, 0, 0, 0.05);
+    }
+
+    /* Stats Badge */
+    .hero-stats {
+        display: flex;
+        justify-content: center;
+        gap: 3rem;
+        margin-top: 5rem;
+        animation: fadeIn 0.8s ease-out 0.6s backwards;
+    }
+
+    .stat-item {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+    }
+
+    .stat-number {
+        font-size: 2.5rem;
+        font-weight: 800;
+        color: #0f172a;
+        /* Dark for light theme */
+    }
+
+    .stat-label {
+        font-size: 0.95rem;
+        color: #64748b;
+        /* Slate gray */
+        text-transform: uppercase;
+        letter-spacing: 1px;
+    }
+
+    /* ... */
+
+    /* Section Headers */
+    .section-header-centered {
+        text-align: center;
+        margin-bottom: 3rem;
+    }
+
+    .section-header-centered h2 {
+        font-size: 2.5rem;
+        font-weight: 800;
+        color: #0f172a;
+        /* Dark */
+        margin-bottom: 1rem;
+    }
+
+    .section-header-centered p {
+        color: #64748b;
+        font-size: 1.1rem;
+    }
+
+    /* FAQ Title */
+    .section-title {
+        color: #0f172a !important;
+        /* Dark */
+    }
+
+    /* Features Section */
+    .features-section {
+        padding: 6rem 0;
+        position: relative;
+    }
+
+    .features-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        gap: 3rem;
+    }
+
+    /* DARK CARDS STYLE */
+    .feature-card {
+        background: #0f172a;
+        /* Dark Blue/Black */
+        color: #f8fafc;
+        /* White Text */
+        backdrop-filter: blur(20px);
+        padding: 3rem;
+        border-radius: 24px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        /* Subtle white border */
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+        transition: all 0.3s ease;
+        text-align: left;
+        position: relative;
+        overflow: hidden;
+    }
+
+    .feature-card:hover {
+        transform: translateY(-10px);
+        box-shadow: 0 30px 60px rgba(0, 0, 0, 0.2);
+        border-color: rgba(99, 102, 241, 0.5);
+        /* Indigo glow */
+    }
+
+    .feature-icon-wrapper {
+        width: 60px;
+        height: 60px;
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.1);
+        /* Translucent white/dark */
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-bottom: 1.5rem;
+        color: #818cf8;
+        /* Light Indigo */
+        font-size: 1.6rem;
+    }
+
+    .feature-card h3 {
+        font-size: 1.5rem;
+        color: white;
+        /* Contrast */
+        margin-bottom: 1rem;
+        font-weight: 700;
+    }
+
+    .feature-card p {
+        color: #cbd5e1;
+        /* Light Slate */
+        line-height: 1.6;
+        font-size: 1.05rem;
+    }
+
+    /* How It Works Section */
+    .how-it-works {
+        padding: 6rem 0;
+        position: relative;
+    }
+
+    .steps-container {
+        display: flex;
+        justify-content: center;
+        gap: 3rem;
+        margin-top: 4rem;
+        flex-wrap: wrap;
+    }
+
+    .step-item {
+        flex: 1;
+        min-width: 250px;
+        max-width: 350px;
+        text-align: center;
+        position: relative;
+    }
+
+    .step-number {
+        font-size: 4rem;
+        font-weight: 800;
+        color: rgba(99, 102, 241, 0.1);
+        /* Indigo tint */
+        position: absolute;
+        top: -30px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 0;
+    }
+
+    .step-content {
+        position: relative;
+        z-index: 1;
+        background: #1e293b;
+        /* Slightly lighter dark */
+        color: white;
+        padding: 2rem;
+        border-radius: 20px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .step-content h4 {
+        font-size: 1.5rem;
+        color: white;
+        margin-bottom: 1rem;
+        font-weight: 700;
+    }
+
+    .step-content p {
+        color: #cbd5e1;
+        line-height: 1.6;
+    }
+
+    /* Testimonials Section */
+    .testimonial-section {
+        padding: 6rem 0;
+        background: none;
+        /* Removed gradient */
+    }
+
+    .testimonial-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: 2rem;
+        margin-top: 4rem;
+    }
+
+    .testimonial-card {
+        background: #0f172a;
+        /* Dark Card */
+        padding: 2.5rem;
+        border-radius: 20px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        position: relative;
+    }
+
+    .quote-icon {
+        position: absolute;
+        top: 2rem;
+        right: 2rem;
+        font-size: 4rem;
+        color: rgba(255, 255, 255, 0.05);
+        /* Subtle */
+        z-index: 0;
+    }
+
+    .testimonial-text {
+        position: relative;
+        z-index: 1;
+        font-style: italic;
+        color: #cbd5e1;
+        margin-bottom: 1.5rem;
+        font-size: 1.1rem;
+        line-height: 1.6;
+    }
+
+    .testimonial-author {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+    }
+
+    .author-avatar {
+        width: 50px;
+        height: 50px;
+        border-radius: 50%;
+        background-color: #334155;
+        background-size: cover;
+    }
+
+    .author-info h4 {
+        margin: 0;
+        color: white;
+        font-size: 1rem;
+    }
+
+    .author-info span {
+        font-size: 0.85rem;
+        color: #94a3b8;
+    }
+
+    /* Pricing Section */
+    .pricing-section {
+        padding: 6rem 0;
+    }
+
+    .pricing-grid {
+        display: flex;
+        justify-content: center;
+        gap: 2rem;
+        flex-wrap: wrap;
+        max-width: 900px;
+        margin: 4rem auto 0;
+    }
+
+    .pricing-card {
+        flex: 1;
+        min-width: 300px;
+        background: #0f172a;
+        /* Dark Card */
+        color: white;
+        border-radius: 24px;
+        padding: 3rem 2rem;
+        text-align: center;
+        border: 2px solid rgba(255, 255, 255, 0.1);
+        transition: all 0.3s ease;
+        position: relative;
+    }
+
+    .pricing-card.free {
+        border-color: rgba(255, 255, 255, 0.1);
+    }
+
+    .pricing-card.pro {
+        border-color: #4f46e5;
+        background: #1e1b4b;
+        /* Darker Indigo for Pro */
+        transform: scale(1.05);
+        box-shadow: 0 25px 50px rgba(79, 70, 229, 0.2);
+        z-index: 2;
+    }
+
+    .pricing-card h3 {
+        color: white;
+        margin-bottom: 0.5rem;
+        font-weight: 700;
+        font-size: 1.5rem;
+    }
+
+    .pricing-badge {
+        position: absolute;
+        top: -12px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: #f39c12;
+        color: white;
+        padding: 0.4rem 1.2rem;
+        border-radius: 50px;
+        font-size: 0.85rem;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+    }
+
+    .price-amount {
+        font-size: 3.5rem;
+        font-weight: 800;
+        color: white;
+        margin: 1rem 0;
+    }
+
+    .price-amount span {
+        font-size: 1.2rem;
+        color: #94a3b8;
+        font-weight: 500;
+    }
+
+    .pricing-features {
+        list-style: none;
+        margin: 2rem 0;
+        padding: 0;
+        text-align: left;
+    }
+
+    .pricing-features li {
+        padding: 0.8rem 0;
+        color: #cbd5e1;
+        display: flex;
+        align-items: center;
+        gap: 0.8rem;
+    }
+
+    .check-icon {
+        color: #10b981;
+        font-size: 1.1rem;
+    }
+
+    .close-icon {
+        color: #64748b;
+        font-size: 1.1rem;
+    }
+
+    /* FAQ Refinements */
+    .faq-item {
+        background: #0f172a;
+        /* Dark Card */
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        transition: all 0.2s ease;
+        margin-bottom: 1rem;
+        border-radius: 12px;
+        overflow: hidden;
+    }
+
+    .faq-item:hover {
+        border-color: #4f46e5;
+    }
+
+    .faq-question {
+        padding: 1.5rem;
+        width: 100%;
+        text-align: left;
+        border: none;
+        background: none;
+        font-size: 1.1rem;
+        font-weight: 600;
+        color: white;
+        cursor: pointer;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .faq-icon {
+        color: #94a3b8;
+    }
+
+    .faq-answer {
+        padding: 0 1.5rem 1.5rem;
+        color: #cbd5e1;
+        /* Light Slate */
+        display: none;
+        line-height: 1.6;
+        text-align: left;
+    }
+
+    .faq-item.active .faq-answer {
+        display: block;
+    }
+
+    /* Section Headers */
+    .section-header-centered {
+        text-align: center;
+        margin-bottom: 3rem;
+    }
+
+    /* Removed conflicting dark color rules, now handled by global overrides at the top */
+
+    @media (max-width: 768px) {
+        .landing-hero h1 {
+            font-size: 2.8rem;
+        }
+
+        .hero-stats {
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        .pricing-card.pro {
+            transform: scale(1);
+        }
+    }
+
+    /* --- ADVANCED ANIMATIONS & FX --- */
+
+    /* 1. Button Shine Effect */
+    .cta-primary,
+    .cta-secondary {
+        position: relative;
+        overflow: hidden;
+    }
+
+    .cta-primary::after {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: -100%;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+        transition: 0.5s;
+    }
+
+    .cta-primary:hover::after {
+        left: 100%;
+    }
+
+    /* 2. Card 3D Tilt & Glow */
+    .feature-card,
+    .testimonial-card,
+    .pricing-card {
+        transform-style: preserve-3d;
+        transform: perspective(1000px);
+        transition: transform 0.1s ease, box-shadow 0.3s ease;
+        /* Faster transform for tilt */
+    }
+
+    .feature-card:hover,
+    .testimonial-card:hover,
+    .pricing-card:hover {
+        /* Glow effect */
+        box-shadow: 0 20px 50px rgba(79, 70, 229, 0.2);
+        border-color: rgba(79, 70, 229, 0.4);
+    }
+
+    /* 3. Floating Particles Background */
+    .particles-container {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        pointer-events: none;
+        z-index: 0;
+        /* Behind content */
+    }
+
+    .particle {
+        position: absolute;
+        border-radius: 50%;
+        /* Indigo with low opacity for subtle effect on light bg */
+        background: rgba(99, 102, 241, 0.15);
+        backdrop-filter: blur(5px);
+        animation: floatUp 20s infinite linear;
+    }
+
+    @keyframes floatUp {
+        0% {
+            transform: translateY(100vh) scale(0);
+            opacity: 0;
+        }
+
+        50% {
+            opacity: 1;
+        }
+
+        100% {
+            transform: translateY(-10vh) scale(1);
+            opacity: 0;
+        }
+    }
+
+    /* 4. Text Reveal */
+    .reveal-text {
+        opacity: 0;
+        transform: translateY(30px);
+        transition: all 0.8s cubic-bezier(0.5, 0, 0, 1);
+    }
+
+    .reveal-text.visible {
+        opacity: 1;
+        transform: translateY(0);
+    }
+
+    /* Adjust Landing Hero for Particles */
+    .landing-hero {
+        z-index: 1;
+        /* Above particles */
+    }
+</style>
+
+<!-- Particles Container -->
+<div class="particles-container">
+    <!-- Particles will be generated by JS -->
+</div>
+
+<div class="landing-container">
+    <!-- HERO SECTION -->
+    <div class="landing-hero">
+        <h1>Unleash Your Data<br>from PDF Chains</h1>
+        <p>Transform static PDF documents into dynamic Excel spreadsheets instantly.
+            Powered by advanced AI to understand layout, context, and financial structures.</p>
+
+        <div class="cta-buttons">
+            <a href="{{ url_for('signup') }}" class="cta-primary">Start for Free</a>
+            <a href="{{ url_for('login') }}" class="cta-secondary">Live Demo</a>
+        </div>
+
+        <div class="hero-stats">
+            <div class="stat-item">
+                <span class="stat-number">10k+</span>
+                <span class="stat-label">Files Converted</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-number">99.9%</span>
+                <span class="stat-label">Accuracy Rate</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-number">500+</span>
+                <span class="stat-label">Users</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- FEATURES SECTION -->
+    <div class="features-section">
+        <div class="section-header-centered">
+            <h2>Why Choose Excel Automation?</h2>
+            <p>Built for professionals who value precision and speed.</p>
+        </div>
+
+        <div class="features-grid">
+            <div class="feature-card">
+                <div class="feature-icon-wrapper">
+                    <i class="fas fa-brain"></i>
+                </div>
+                <h3>Context-Aware AI</h3>
+                <p>Unlike basic OCR, our AI understands what "Total Balance" means, ensuring data lands in the right
+                    column every single time.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon-wrapper">
+                    <i class="fas fa-file-invoice"></i>
+                </div>
+                <h3>Financial Formats</h3>
+                <p>Specialized handling for bank statements, invoices, and receipts. We preserve table structures others
+                    break.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon-wrapper">
+                    <i class="fas fa-lock"></i>
+                </div>
+                <h3>Enterprise Security</h3>
+                <p>Your data is encrypted in transit and at rest. Files are automatically purged from our servers after
+                    24 hours.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- HOW IT WORKS -->
+    <div class="how-it-works">
+        <div class="section-header-centered">
+            <h2>From PDF to Excel in 3 Steps</h2>
+        </div>
+        <div class="steps-container">
+            <div class="step-item">
+                <div class="step-number">01</div>
+                <div class="step-content">
+                    <h4>Upload</h4>
+                    <p>Drag & drop any PDF. We support scanned images and digital files.</p>
+                </div>
+            </div>
+            <div class="step-item">
+                <div class="step-number">02</div>
+                <div class="step-content">
+                    <h4>Analyze</h4>
+                    <p>Watch as our AI identifies tables, headers, and data points.</p>
+                </div>
+            </div>
+            <div class="step-item">
+                <div class="step-number">03</div>
+                <div class="step-content">
+                    <h4>Export</h4>
+                    <p>Download a clean, formatted .xlsx file ready for work.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- TESTIMONIALS SECTION -->
+    <div class="testimonial-section">
+        <div class="section-header-centered">
+            <h2>Trusted by Accountants</h2>
+            <p>See what our users say about saving time.</p>
+        </div>
+        <div class="testimonial-grid">
+            <div class="testimonial-card">
+                <i class="fas fa-quote-right quote-icon"></i>
+                <p class="testimonial-text">"I used to spend 4 hours a week typing data from invoices. This tool did it
+                    in 30 seconds. Absolutely game changing."</p>
+                <div class="testimonial-author">
+                    <div class="author-avatar"
+                        style="background-image: url('https://ui-avatars.com/api/?name=Sarah+J&background=random');">
+                    </div>
+                    <div class="author-info">
+                        <h4>Sarah Jenkins</h4>
+                        <span>CPA, FinCorp</span>
+                    </div>
+                </div>
+            </div>
+            <div class="testimonial-card">
+                <i class="fas fa-quote-right quote-icon"></i>
+                <p class="testimonial-text">"The accuracy on scanned receipts is incredible. Even crinkled paper gets
+                    read correctly. Worth every penny."</p>
+                <div class="testimonial-author">
+                    <div class="author-avatar"
+                        style="background-image: url('https://ui-avatars.com/api/?name=Mike+R&background=random');">
+                    </div>
+                    <div class="author-info">
+                        <h4>Mike Ross</h4>
+                        <span>Freelance Bookkeeper</span>
+                    </div>
+                </div>
+            </div>
+            <div class="testimonial-card">
+                <i class="fas fa-quote-right quote-icon"></i>
+                <p class="testimonial-text">"QuickBooks integration is seamless. It's like having a virtual assistant
+                    doing the data entry for me."</p>
+                <div class="testimonial-author">
+                    <div class="author-avatar"
+                        style="background-image: url('https://ui-avatars.com/api/?name=Emily+W&background=random');">
+                    </div>
+                    <div class="author-info">
+                        <h4>Emily Wong</h4>
+                        <span>Small Business Owner</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- PRICING SECTION -->
+    <div id="pricing" class="pricing-section">
+        <div class="section-header-centered">
+            <h2>Simple, Transparent Pricing</h2>
+            <p>Start for free, upgrade when you scale.</p>
+        </div>
+
+        <div class="pricing-grid">
+            <!-- Free Plan -->
+            <div class="pricing-card free">
+                <h3>Starter</h3>
+                <div class="price-amount">$0<span>/mo</span></div>
+                <p>Perfect for trying it out.</p>
+                <a href="{{ url_for('signup') }}" class="cta-secondary"
+                    style="width: 100%; display: block; margin-top: 1rem;">Sign Up Free</a>
+
+                <ul class="pricing-features">
+                    <li><i class="fas fa-check check-icon"></i> 3 Free Conversions/mo</li>
+                    <li><i class="fas fa-check check-icon"></i> 5 Pages limit per file</li>
+                    <li><i class="fas fa-check check-icon"></i> Standard Processing Speed</li>
+                    <li><i class="fas fa-times close-icon"></i> No Table Extraction</li>
+                </ul>
+            </div>
+
+            <!-- Pro Plan -->
+            <div class="pricing-card pro">
+                <div class="pricing-badge">MOST POPULAR</div>
+                <h3>Professional</h3>
+                <div class="price-amount">$15<span>/mo</span></div>
+                <p>For power users & pros.</p>
+                <a href="{{ url_for('cart') }}" class="cta-primary"
+                    style="width: 100%; display: block; margin-top: 1rem;">Go Pro</a>
+
+                <ul class="pricing-features">
+                    <li><i class="fas fa-check check-icon"></i> Unlimited Conversions</li>
+                    <li><i class="fas fa-check check-icon"></i> Unlimited Pages</li>
+                    <li><i class="fas fa-check check-icon"></i> Priority Processing</li>
+                    <li><i class="fas fa-check check-icon"></i> Advanced Table Extraction</li>
+                    <li><i class="fas fa-check check-icon"></i> Priority Support</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- FAQ SECTION -->
+    <div class="faq-section">
+        <h2 class="section-title" style="text-align: center;">Frequently Asked Questions</h2>
+
+        <div class="faq-item">
+            <button class="faq-question">
+                Is it really free?
+                <i class="fas fa-chevron-down faq-icon"></i>
+            </button>
+            <div class="faq-answer">
+                Yes! You get 3 free conversions to try out the service. No credit card required.
+            </div>
+        </div>
+
+        <div class="faq-item">
+            <button class="faq-question">
+                Does it work with scanned documents?
+                <i class="fas fa-chevron-down faq-icon"></i>
+            </button>
+            <div class="faq-answer">
+                Absolutely. Our "Scanned PDF" mode uses OCR technology to read text from images.
+            </div>
+        </div>
+
+        <div class="faq-item">
+            <button class="faq-question">
+                Is my data secure?
+                <i class="fas fa-chevron-down faq-icon"></i>
+            </button>
+            <div class="faq-answer">
+                We prioritize your security. Files are encrypted during transmission and automatically deleted after 24
+                hours.
+            </div>
+        </div>
+    </div>
+
+    <!-- FINAL CTA -->
+    <div class="cta-section"
+        style="text-align: center; margin-bottom: 6rem; background: #4f46e5; color: white; padding: 4rem; border-radius: 20px;">
+        <h2 style="margin-bottom: 1.5rem; font-size: 2.5rem; font-weight: 800;">Ready to automate your workflow?</h2>
+        <p style="margin-bottom: 2rem; opacity: 0.9; font-size: 1.2rem;">Join thousands of automated professionals
+            today.</p>
+        <a href="{{ url_for('signup') }}"
+            style="background: white; color: #4f46e5; padding: 1.2rem 3rem; border-radius: 50px; text-decoration: none; font-weight: 700; font-size: 1.1rem; display: inline-block;">Get
+            Started Now</a>
+    </div>
+
+</div>
+
+<script>
+    // 1. Generate Particles
+    try {
+        const particlesContainer = document.querySelector('.particles-container');
+        if (particlesContainer) {
+            const particleCount = 20;
+
+            for (let i = 0; i < particleCount; i++) {
+                const particle = document.createElement('div');
+                particle.classList.add('particle');
+
+                // Randomize
+                const size = Math.random() * 50 + 10 + 'px';
+                particle.style.width = size;
+                particle.style.height = size;
+                particle.style.left = Math.random() * 100 + '%';
+                particle.style.animationDuration = (Math.random() * 10 + 10) + 's';
+                particle.style.animationDelay = (Math.random() * 5) + 's';
+
+                particlesContainer.appendChild(particle);
+            }
+        }
+    } catch (e) {
+        console.log('Particle gen error:', e);
+    }
+
+    // 2. 3D Tilt Effect
+    const cards = document.querySelectorAll('.feature-card, .testimonial-card, .pricing-card');
+
+    cards.forEach(card => {
+        card.addEventListener('mousemove', (e) => {
+            const rect = card.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            // Calculate center
+            const centerX = rect.width / 2;
+            const centerY = rect.height / 2;
+
+            // Calculate tilt (limit to +/- 10deg)
+            const rotateX = ((y - centerY) / centerY) * -5;
+            const rotateY = ((x - centerX) / centerX) * 5;
+
+            card.style.transform = `perspective(1000px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) scale(1.02)`;
+        });
+
+        card.addEventListener('mouseleave', () => {
+            card.style.transform = 'perspective(1000px) rotateX(0) rotateY(0) scale(1)';
+        });
+    });
+
+    // 3. Scroll Reveal (Enhanced)
+    const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                entry.target.classList.add('visible');
+            }
+        });
+    }, { threshold: 0.1 });
+
+    document.querySelectorAll('.feature-card, .step-item, .pricing-card, .testimonial-card, h2, p').forEach(el => {
+        el.classList.add('reveal-text');
+        observer.observe(el);
+    });
+
+    // FAQ Toggle
+    document.querySelectorAll('.faq-question').forEach(button => {
+        button.addEventListener('click', () => {
+            const item = button.parentElement;
+            item.classList.toggle('active');
+        });
+    });
+</script>
+
+{% endblock %}

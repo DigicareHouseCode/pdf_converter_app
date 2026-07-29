@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Excel Automation</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="shortcut icon" href="{{ url_for('static', filename='images/favicon.ico') }}" type="image/x-icon">
+</head>
+
+<body>
+    <nav class="navbar">
+        <div class="nav-container">
+            <div class="nav-branding">
+                <a href="https://digicareproducts.com/" target="_blank" class="logo-link">
+                    <img src="{{ url_for('static', filename='images/digicare-logo.png') }}" alt="DigiCare Products Logo"
+                        class="nav-logo-image">
+                </a>
+                <span class="powered-by">Powered by DigiCare Products</span>
+            </div>
+
+            <div class="nav-slogan">
+                <span>"We can do what GPT cannot do"</span>
+            </div>
+
+            <div class="nav-actions">
+                {% if current_user.is_authenticated %}
+                <div class="nav-user">
+                    {% if current_user.picture_url %}
+                    <img src="{{ current_user.picture_url }}" alt="Profile" class="user-avatar"
+                        onerror="this.src='https://ui-avatars.com/api/?name={{ current_user.name or current_user.username }}&background=4f46e5&color=fff'">
+                    {% else %}
+                    <div class="user-avatar-placeholder">
+                        <i class="fas fa-user"></i>
+                    </div>
+                    {% endif %}
+                    <span class="username">{{ current_user.name or current_user.username }}</span>
+                    <!-- Link to Dashboard if on Landing Page -->
+                    <a href="{{ url_for('dashboard') }}" class="dashboard-link"
+                        style="text-decoration:none; color:#4f46e5; font-weight:600; font-size:0.9rem; margin-right:5px;">Dashboard</a>
+                    <a href="{{ url_for('logout') }}" class="logout-btn">
+                        <i class="fas fa-sign-out-alt"></i>
+                        <span>Logout</span>
+                    </a>
+                </div>
+                {% else %}
+                <div class="auth-links">
+                    <a href="{{ url_for('index') }}#pricing" class="login-link-nav" style="margin-right: 0.5rem;">Buy
+                        Now</a>
+                    <a href="{{ url_for('login') }}" class="signup-btn-nav">Try Free</a>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </nav>
+
+
+
+    <div class="container">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        {% for category, message in messages %}
+        <div class="alert alert-{{ category }} {% if 'already a Pro user' in message %}alert-pro-premium{% endif %}">
+            {% if 'already a Pro user' in message %}
+            <i class="fas fa-crown premium-icon"></i>
+            {% endif %}
+            {{ message }}
+        </div>
+        {% endfor %}
+        {% endif %}
+        {% endwith %}
+
+        {% block content %}{% endblock %}
+    </div>
+
+    <footer class="footer">
+        <div class="footer-content">
+            <p>&copy; 2025 Excel Automation. Powered by DigiCare Products</p>
+        </div>
+    </footer>
+
+    <script>
+        // Define the app root path dynamically for JS fetch calls
+        window.APP_ROOT = "{{ url_for('index') }}".replace(/\/$/, "");
+    </script>
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+</body>
+
+</html>

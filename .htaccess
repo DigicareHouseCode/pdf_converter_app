@@ -1,0 +1,23 @@
+# Increase upload limits to 1GB
+LimitRequestBody 1073741824
+<IfModule mod_php.c>
+    php_value upload_max_filesize 1024M
+    php_value post_max_size 1024M
+    php_value max_execution_time 600
+    php_value max_input_time 600
+</IfModule>
+
+Options +FollowSymLinks -Indexes
+
+RewriteEngine On
+
+# Allow direct access to static files
+RewriteCond %{REQUEST_URI} static/ [NC]
+RewriteRule ^ - [L]
+
+# Ignore favicon
+RewriteRule ^favicon\.ico$ - [L]
+
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^(.*)$ passenger_wsgi.py/$1 [QSA,L]

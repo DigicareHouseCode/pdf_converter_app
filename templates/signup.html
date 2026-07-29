@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="login-section">
+    <div class="login-card">
+        <div class="card-header">
+            <i class="fas fa-user-plus"></i>
+            <h2>Create Account</h2>
+            <p>Join PDF Converter to start transforming your documents</p>
+        </div>
+
+        <form id="signupForm" action="{{ url_for('signup') }}" method="post">
+            <div class="form-group">
+                <label for="username">
+                    <i class="fas fa-user"></i>
+                    Username
+                </label>
+                <input type="text" id="username" name="username" required placeholder="Pick a unique username">
+            </div>
+
+            <div class="form-group">
+                <label for="email">
+                    <i class="fas fa-envelope"></i>
+                    Email Address
+                </label>
+                <input type="email" id="email" name="email" required placeholder="your@email.com">
+            </div>
+
+            <div class="form-group">
+                <label for="password">
+                    <i class="fas fa-key"></i>
+                    Password
+                </label>
+                <input type="password" id="password" name="password" required placeholder="Create a strong password">
+            </div>
+
+            <button type="submit" class="login-btn signup-btn">
+                <i class="fas fa-magic"></i>
+                Create My Account
+            </button>
+        </form>
+
+        <div class="divider">
+            <span>OR</span>
+        </div>
+
+        <div class="google-login-container">
+            <a href="{{ url_for('auth.google_login') }}" class="google-login-btn">
+                <img src="https://developers.google.com/identity/images/g-logo.png" alt="Google Logo">
+                Sign up with Google
+            </a>
+        </div>
+
+        <div class="card-footer">
+            <p>Already have an account? <a href="{{ url_for('login') }}">Log In</a></p>
+        </div>
+    </div>
+</div>
+
+<style>
+    .signup-btn {
+        background: linear-gradient(135deg, #3B82F6, #1D4ED8) !important;
+    }
+
+    .card-footer {
+        margin-top: 25px;
+        padding-top: 15px;
+        border-top: 1px solid #f1f5f9;
+        text-align: center;
+    }
+
+    .card-footer p {
+        color: #64748b;
+        font-size: 0.9rem;
+    }
+
+    .card-footer a {
+        color: #3b82f6;
+        text-decoration: none;
+        font-weight: 600;
+    }
+
+    .card-footer a:hover {
+        text-decoration: underline;
+    }
+
+    /* Inherited/Standardized styles */
+    .divider {
+        text-align: center;
+        position: relative;
+        margin: 25px 0;
+    }
+
+    .divider::before {
+        content: "";
+        position: absolute;
+        top: 50%;
+        left: 0;
+        right: 0;
+        height: 1px;
+        background: #e2e8f0;
+        z-index: 1;
+    }
+
+    .divider span {
+        background: #fff;
+        padding: 0 15px;
+        color: #94a3b8;
+        position: relative;
+        z-index: 2;
+        font-size: 0.85rem;
+        font-weight: 500;
+    }
+
+    .google-login-container {
+        margin-top: 10px;
+    }
+
+    .google-login-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background-color: white;
+        color: #1f2937;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        padding: 12px;
+        text-decoration: none;
+        font-weight: 600;
+        transition: all 0.2s;
+    }
+
+    .google-login-btn:hover {
+        background-color: #f8fafc;
+        border-color: #cbd5e1;
+        transform: translateY(-1px);
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    }
+
+    .google-login-btn img {
+        width: 20px;
+        height: 20px;
+        margin-right: 12px;
+    }
+</style>
+{% endblock %}

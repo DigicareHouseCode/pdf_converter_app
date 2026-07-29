@@ -1,0 +1,1080 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="expenses-section">
+    <div class="expenses-header">
+        <div class="header-content">
+            <h1>
+                <i class="fas fa-chart-pie"></i>
+                Expense Dashboard
+            </h1>
+            <p>Monitor and analyze your business spending</p>
+        </div>
+        <div class="header-actions">
+            <a href="https://sandbox.qbo.intuit.com/app/expenses" target="_blank" class="qb-link-btn">
+                <i class="fas fa-external-link-alt"></i>
+                Open in QuickBooks
+            </a>
+        </div>
+    </div>
+
+    {% if summary %}
+    <div class="expense-summary">
+        <div class="summary-cards">
+            <div class="summary-card total">
+                <div class="card-icon">
+                    <i class="fas fa-money-bill-wave"></i>
+                </div>
+                <div class="card-content">
+                    <h3>${{ "%.2f"|format(summary.total_expenses) }}</h3>
+                    <p>Total Expenses</p>
+                    <small>{{ summary.date_range }}</small>
+                </div>
+                <div class="card-trend">
+                    <i class="fas fa-chart-line"></i>
+                </div>
+            </div>
+
+            <div class="summary-card count">
+                <div class="card-icon">
+                    <i class="fas fa-receipt"></i>
+                </div>
+                <div class="card-content">
+                    <h3>{{ summary.transaction_count }}</h3>
+                    <p>Transactions</p>
+                    <small>{{ summary.date_range }}</small>
+                </div>
+                <div class="card-trend">
+                    <i class="fas fa-file-invoice"></i>
+                </div>
+            </div>
+
+            <div class="summary-card average">
+                <div class="card-icon">
+                    <i class="fas fa-calculator"></i>
+                </div>
+                <div class="card-content">
+                    <h3>${{ "%.2f"|format(summary.average_expense) }}</h3>
+                    <p>Average Expense</p>
+                    <small>Per transaction</small>
+                </div>
+                <div class="card-trend">
+                    <i class="fas fa-balance-scale"></i>
+                </div>
+            </div>
+        </div>
+
+        <div class="summary-details">
+            <div class="detail-card">
+                <div class="detail-card-header">
+                    <h4><i class="fas fa-tags"></i> Expense Categories</h4>
+                    <span class="detail-count">{{ summary.categories|length }} categories</span>
+                </div>
+                <div class="category-list">
+                    {% for category, count in summary.categories.items() %}
+                    <div class="category-item">
+                        <div class="category-info">
+                            <span class="category-dot" style="background: {{ ['#3B82F6', '#EF4444', '#10B981', '#F59E0B', '#8B5CF6', '#EC4899', '#06B6D4', '#84CC16']|random }}"></span>
+                            <span class="category-name">{{ category }}</span>
+                        </div>
+                        <div class="category-stats">
+                            <span class="category-count">{{ count }}</span>
+                            <span class="category-badge">transactions</span>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <div class="detail-card">
+                <div class="detail-card-header">
+                    <h4><i class="fas fa-building"></i> Top Vendors</h4>
+                    <span class="detail-count">{{ summary.top_vendors|length }} vendors</span>
+                </div>
+                <div class="vendor-list">
+                    {% for vendor, amount in summary.top_vendors.items() %}
+                    <div class="vendor-item">
+                        <div class="vendor-info">
+                            <div class="vendor-avatar">
+                                {{ vendor[0]|upper }}
+                            </div>
+                            <span class="vendor-name">{{ vendor }}</span>
+                        </div>
+                        <div class="vendor-amount">${{ "%.2f"|format(amount) }}</div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Vendor Expense Pie Chart Section -->
+        <div class="chart-section">
+            <div class="detail-card chart-card">
+                <div class="detail-card-header">
+                    <h4><i class="fas fa-chart-pie"></i> Vendor Expense Distribution</h4>
+                    <span class="detail-count">Top {{ summary.chart_vendors|length }} vendors by amount</span>
+                </div>
+                <div class="chart-container">
+                    <canvas id="vendorPieChart"></canvas>
+                </div>
+                <div class="chart-legend" id="vendorChartLegend"></div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="transactions-section">
+        <div class="content-header">
+            <div class="header-title">
+                <h3><i class="fas fa-list-alt"></i> Recent Expense Transactions</h3>
+                <div class="transaction-stats">
+                    <span class="transaction-count">{{ total_count }} transactions</span>
+                </div>
+            </div>
+            <div class="header-filters">
+                <button class="filter-btn active">
+                    <i class="fas fa-filter"></i>
+                    All
+                </button>
+                <button class="filter-btn">
+                    <i class="fas fa-shopping-cart"></i>
+                    Purchases
+                </button>
+                <button class="filter-btn">
+                    <i class="fas fa-file-invoice-dollar"></i>
+                    Bills
+                </button>
+            </div>
+        </div>
+
+        {% if transactions %}
+        <div class="expenses-table-container">
+            <div class="expenses-table">
+                <div class="table-header">
+                    <div class="col-date">Date</div>
+                    <div class="col-type">Type</div>
+                    <div class="col-vendor">Vendor/Payee</div>
+                    <div class="col-account">Account</div>
+                    <div class="col-amount">Amount</div>
+                    <div class="col-status">Status</div>
+                </div>
+
+                <div class="table-body">
+                    {% for transaction in transactions %}
+                    <div class="table-row">
+                        <div class="col-date">
+                            <strong>{{ transaction.date }}</strong>
+                        </div>
+                        <div class="col-type">
+                            <span class="type-badge type-{{ transaction.type|lower|replace(' ', '-') }}">
+                                <i class="fas fa-{{ 'shopping-cart' if transaction.type|lower == 'purchase' else 'file-invoice-dollar' if transaction.type|lower == 'bill' else 'exchange-alt' if transaction.type|lower == 'journal entry' else 'hand-holding-usd' }}"></i>
+                                {{ transaction.type }}
+                            </span>
+                        </div>
+                        <div class="col-vendor">
+                            <div class="vendor-avatar-sm">
+                                {{ transaction.vendor[0]|upper if transaction.vendor else '?' }}
+                            </div>
+                            <div class="vendor-details">
+                                <strong>{{ transaction.vendor if transaction.vendor else 'Unknown Vendor' }}</strong>
+                                {% if transaction.description %}
+                                <small>{{ transaction.description }}</small>
+                                {% endif %}
+                            </div>
+                        </div>
+                        <div class="col-account">
+                            {{ transaction.account }}
+                        </div>
+                        <div class="col-amount">
+                            <strong class="amount">${{ "%.2f"|format(transaction.amount) }}</strong>
+                        </div>
+                        <div class="col-status">
+                            <span class="status-badge status-{{ transaction.status|lower }}">
+                                <i class="fas fa-{{ 'check-circle' if transaction.status|lower in ['paid', 'posted'] else 'clock' if transaction.status|lower == 'open' else 'exclamation-triangle' if transaction.status|lower == 'overdue' else 'question-circle' }}"></i>
+                                {{ transaction.status }}
+                            </span>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+        {% else %}
+        <div class="no-expenses">
+            <div class="no-expenses-icon">
+                <i class="fas fa-receipt"></i>
+            </div>
+            <h4>No expense transactions found</h4>
+            <p>No expense transactions were found in your QuickBooks account for the last 90 days.</p>
+            <div class="suggestions">
+                <p class="suggestions-title">To see expenses here:</p>
+                <div class="suggestion-cards">
+                    <div class="suggestion-card">
+                        <i class="fas fa-cart-plus"></i>
+                        <span>Create purchase transactions</span>
+                    </div>
+                    <div class="suggestion-card">
+                        <i class="fas fa-file-invoice"></i>
+                        <span>Enter bills from vendors</span>
+                    </div>
+                    <div class="suggestion-card">
+                        <i class="fas fa-book"></i>
+                        <span>Record expense journal entries</span>
+                    </div>
+                    <div class="suggestion-card">
+                        <i class="fas fa-calendar-alt"></i>
+                        <span>Check date range settings</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="action-buttons">
+        <a href="{{ url_for('index') }}" class="action-btn">
+            <i class="fas fa-arrow-left"></i>
+            Back to Converter
+        </a>
+        <a href="{{ url_for('quickbooks_setup') }}" class="quickbooks-btn">
+            <i class="fas fa-cog"></i>
+            QuickBooks Settings
+        </a>
+    </div>
+</div>
+
+<style>
+.expenses-section {
+    padding: 2rem 0;
+    min-height: 100vh;
+}
+
+.expenses-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2rem;
+    padding: 2rem;
+    background: white;
+    border-radius: 16px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+    border: 1px solid #e2e8f0;
+}
+
+.header-content h1 {
+    color: #1e293b;
+    margin-bottom: 0.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    font-size: 2rem;
+    font-weight: 700;
+}
+
+.header-content h1 i {
+    color: #3B82F6;
+}
+
+.header-content p {
+    color: #64748b;
+    margin: 0;
+    font-size: 1.1rem;
+}
+
+.qb-link-btn {
+    background: linear-gradient(135deg, #2CA01C, #1F7B15);
+    color: white;
+    padding: 0.875rem 1.75rem;
+    border-radius: 12px;
+    text-decoration: none;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 12px rgba(44, 160, 28, 0.2);
+    border: none;
+    font-size: 0.95rem;
+}
+
+.qb-link-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(44, 160, 28, 0.3);
+}
+
+.expense-summary {
+    margin-bottom: 2rem;
+}
+
+.summary-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1.5rem;
+    margin-bottom: 2rem;
+}
+
+.summary-card {
+    background: white;
+    padding: 2rem;
+    border-radius: 16px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+    display: flex;
+    align-items: center;
+    gap: 1.25rem;
+    border-left: 6px solid;
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.summary-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
+}
+
+.summary-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.5), transparent);
+}
+
+.summary-card.total {
+    border-left-color: #EF4444;
+    background: linear-gradient(135deg, #fff, #fef2f2);
+}
+
+.summary-card.count {
+    border-left-color: #3B82F6;
+    background: linear-gradient(135deg, #fff, #f0f9ff);
+}
+
+.summary-card.average {
+    border-left-color: #10B981;
+    background: linear-gradient(135deg, #fff, #f0fdf4);
+}
+
+.card-icon {
+    font-size: 2.5rem;
+    opacity: 0.9;
+    flex-shrink: 0;
+}
+
+.summary-card.total .card-icon {
+    color: #EF4444;
+}
+
+.summary-card.count .card-icon {
+    color: #3B82F6;
+}
+
+.summary-card.average .card-icon {
+    color: #10B981;
+}
+
+.card-content {
+    flex: 1;
+}
+
+.card-content h3 {
+    margin: 0;
+    font-size: 2rem;
+    font-weight: 800;
+    color: #1e293b;
+}
+
+.card-content p {
+    margin: 0.5rem 0 0.5rem 0;
+    font-weight: 600;
+    color: #475569;
+    font-size: 1rem;
+}
+
+.card-content small {
+    color: #64748b;
+    font-size: 0.85rem;
+}
+
+.card-trend {
+    color: #cbd5e1;
+    font-size: 1.5rem;
+}
+
+.summary-details {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2rem;
+    margin-bottom: 2rem;
+}
+
+.chart-section {
+    margin-bottom: 2rem;
+}
+
+.chart-card {
+    grid-column: 1 / -1;
+}
+
+.chart-container {
+    position: relative;
+    height: 400px;
+    margin: 2rem 0;
+}
+
+.chart-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    justify-content: center;
+    margin-top: 1.5rem;
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    background: #f8fafc;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+
+.legend-color {
+    width: 16px;
+    height: 16px;
+    border-radius: 4px;
+    flex-shrink: 0;
+}
+
+.legend-value {
+    color: #64748b;
+    font-weight: 500;
+}
+
+.detail-card {
+    background: white;
+    padding: 2rem;
+    border-radius: 16px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+    border: 1px solid #f1f5f9;
+}
+
+.detail-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+    padding-bottom: 1rem;
+    border-bottom: 2px solid #f8fafc;
+}
+
+.detail-card-header h4 {
+    margin: 0;
+    color: #1e293b;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    font-size: 1.25rem;
+}
+
+.detail-count {
+    background: #f1f5f9;
+    color: #64748b;
+    padding: 0.25rem 0.75rem;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.category-list, .vendor-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.category-item, .vendor-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem;
+    border-radius: 12px;
+    background: #f8fafc;
+    transition: background-color 0.3s ease;
+}
+
+.category-item:hover, .vendor-item:hover {
+    background: #f1f5f9;
+}
+
+.category-info, .vendor-info {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.category-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.category-name, .vendor-name {
+    font-weight: 600;
+    color: #475569;
+}
+
+.category-stats {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.category-count {
+    font-weight: 700;
+    color: #1e293b;
+    font-size: 1.1rem;
+}
+
+.category-badge {
+    background: #e2e8f0;
+    color: #64748b;
+    padding: 0.25rem 0.5rem;
+    border-radius: 8px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.vendor-avatar, .vendor-avatar-sm {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #3B82F6, #1D4ED8);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 1rem;
+    flex-shrink: 0;
+}
+
+.vendor-avatar-sm {
+    width: 36px;
+    height: 36px;
+    font-size: 0.9rem;
+}
+
+.vendor-amount {
+    font-weight: 700;
+    color: #EF4444;
+    font-size: 1.1rem;
+}
+
+.transactions-section {
+    background: white;
+    border-radius: 16px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+    overflow: hidden;
+    border: 1px solid #f1f5f9;
+}
+
+.content-header {
+    padding: 2rem;
+    border-bottom: 2px solid #f8fafc;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 1rem;
+}
+
+.header-title h3 {
+    margin: 0 0 0.5rem 0;
+    color: #1e293b;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    font-size: 1.5rem;
+}
+
+.transaction-stats {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.transaction-count {
+    background: #dbeafe;
+    color: #1e40af;
+    padding: 0.5rem 1rem;
+    border-radius: 12px;
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+
+.header-filters {
+    display: flex;
+    gap: 0.75rem;
+}
+
+.filter-btn {
+    background: #f8fafc;
+    border: 2px solid #e2e8f0;
+    padding: 0.75rem 1.25rem;
+    border-radius: 12px;
+    font-weight: 600;
+    color: #64748b;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.9rem;
+}
+
+.filter-btn.active, .filter-btn:hover {
+    background: #3B82F6;
+    color: white;
+    border-color: #3B82F6;
+}
+
+.expenses-table-container {
+    overflow-x: auto;
+}
+
+.expenses-table {
+    width: 100%;
+    min-width: 800px;
+}
+
+.table-header {
+    display: grid;
+    grid-template-columns: 1fr 1fr 2fr 1.5fr 1fr 1fr;
+    background: #f8fafc;
+    padding: 1.25rem 2rem;
+    font-weight: 700;
+    color: #475569;
+    border-bottom: 2px solid #e2e8f0;
+    font-size: 0.9rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.table-body {
+    display: flex;
+    flex-direction: column;
+}
+
+.table-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr 2fr 1.5fr 1fr 1fr;
+    padding: 1.5rem 2rem;
+    border-bottom: 1px solid #f1f5f9;
+    align-items: center;
+    transition: background-color 0.3s ease;
+}
+
+.table-row:last-child {
+    border-bottom: none;
+}
+
+.table-row:hover {
+    background: #f8fafc;
+}
+
+.col-vendor {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.vendor-details {
+    display: flex;
+    flex-direction: column;
+}
+
+.vendor-details small {
+    color: #64748b;
+    font-size: 0.85rem;
+    margin-top: 0.25rem;
+}
+
+.type-badge {
+    padding: 0.5rem 1rem;
+    border-radius: 12px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: fit-content;
+}
+
+.type-purchase {
+    background: #dbeafe;
+    color: #1e40af;
+    border: 1px solid #bfdbfe;
+}
+
+.type-bill {
+    background: #fef3c7;
+    color: #92400e;
+    border: 1px solid #fde68a;
+}
+
+.type-vendor-credit {
+    background: #dcfce7;
+    color: #166534;
+    border: 1px solid #bbf7d0;
+}
+
+.type-journal-entry {
+    background: #f3e8ff;
+    color: #7e22ce;
+    border: 1px solid #e9d5ff;
+}
+
+.amount {
+    color: #EF4444;
+    font-weight: 700;
+    font-size: 1.1rem;
+}
+
+.status-badge {
+    padding: 0.5rem 1rem;
+    border-radius: 12px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: fit-content;
+}
+
+.status-paid, .status-posted, .status-credit {
+    background: #dcfce7;
+    color: #166534;
+    border: 1px solid #bbf7d0;
+}
+
+.status-open {
+    background: #fef3c7;
+    color: #92400e;
+    border: 1px solid #fde68a;
+}
+
+.status-overdue {
+    background: #fee2e2;
+    color: #dc2626;
+    border: 1px solid #fecaca;
+}
+
+.status-unknown {
+    background: #f3f4f6;
+    color: #6b7280;
+    border: 1px solid #e5e7eb;
+}
+
+.no-expenses {
+    text-align: center;
+    padding: 4rem 2rem;
+    color: #64748b;
+}
+
+.no-expenses-icon {
+    font-size: 4rem;
+    margin-bottom: 1.5rem;
+    color: #cbd5e1;
+}
+
+.no-expenses h4 {
+    margin-bottom: 1rem;
+    color: #475569;
+    font-size: 1.5rem;
+}
+
+.no-expenses p {
+    font-size: 1.1rem;
+    max-width: 500px;
+    margin: 0 auto 2rem auto;
+}
+
+.suggestions-title {
+    color: #475569;
+    font-weight: 600;
+    margin-bottom: 1.5rem;
+}
+
+.suggestion-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+    max-width: 600px;
+    margin: 0 auto;
+}
+
+.suggestion-card {
+    background: #f8fafc;
+    padding: 1.5rem;
+    border-radius: 12px;
+    text-align: center;
+    transition: transform 0.3s ease;
+    border: 1px solid #e2e8f0;
+}
+
+.suggestion-card:hover {
+    transform: translateY(-2px);
+    background: #f1f5f9;
+}
+
+.suggestion-card i {
+    font-size: 1.5rem;
+    color: #3B82F6;
+    margin-bottom: 0.75rem;
+    display: block;
+}
+
+.suggestion-card span {
+    font-weight: 600;
+    color: #475569;
+    font-size: 0.9rem;
+}
+
+.action-buttons {
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+    margin-top: 3rem;
+    flex-wrap: wrap;
+}
+
+.action-btn, .quickbooks-btn {
+    padding: 1rem 2rem;
+    border-radius: 12px;
+    text-decoration: none;
+    font-weight: 700;
+    transition: all 0.3s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.75rem;
+    font-size: 1rem;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.action-btn {
+    background: #3498db;
+    color: white;
+    border: 2px solid #3498db;
+}
+
+.quickbooks-btn {
+    background: linear-gradient(135deg, #2CA01C, #1F7B15);
+    color: white;
+    border: 2px solid #1F7B15;
+}
+
+.action-btn:hover, .quickbooks-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
+}
+
+.action-btn:hover {
+    background: #2980b9;
+    border-color: #2980b9;
+}
+
+@media (max-width: 1024px) {
+    .summary-details {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 768px) {
+    .expenses-header {
+        flex-direction: column;
+        gap: 1.5rem;
+        text-align: center;
+        padding: 1.5rem;
+    }
+
+    .summary-cards {
+        grid-template-columns: 1fr;
+    }
+
+    .content-header {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 1.5rem;
+    }
+
+    .header-filters {
+        justify-content: center;
+        flex-wrap: wrap;
+    }
+
+    .table-header, .table-row {
+        grid-template-columns: 1fr;
+        gap: 1rem;
+        padding: 1rem;
+    }
+
+    .col-date, .col-type, .col-vendor, .col-account, .col-amount, .col-status {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.5rem 0;
+        border-bottom: 1px solid #f1f5f9;
+    }
+
+    .col-date::before { content: "Date: "; font-weight: 700; color: #475569; }
+    .col-type::before { content: "Type: "; font-weight: 700; color: #475569; }
+    .col-vendor::before { content: "Vendor: "; font-weight: 700; color: #475569; }
+    .col-account::before { content: "Account: "; font-weight: 700; color: #475569; }
+    .col-amount::before { content: "Amount: "; font-weight: 700; color: #475569; }
+    .col-status::before { content: "Status: "; font-weight: 700; color: #475569; }
+
+    .col-vendor {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.5rem;
+    }
+
+    .type-badge, .status-badge {
+        width: 100%;
+        justify-content: center;
+    }
+
+    .action-buttons {
+        flex-direction: column;
+        align-items: center;
+    }
+
+    .action-btn, .quickbooks-btn {
+        width: 100%;
+        max-width: 300px;
+        justify-content: center;
+    }
+
+    .chart-container {
+        height: 300px;
+    }
+
+    .chart-legend {
+        flex-direction: column;
+        align-items: center;
+    }
+}
+</style>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Vendor data for the pie chart - using chart_vendors instead of top_vendors
+    const vendorData = {
+        {% if summary and summary.chart_vendors %}
+            {% for vendor, amount in summary.chart_vendors.items() %}
+                '{{ vendor }}': {{ amount }},
+            {% endfor %}
+        {% endif %}
+    };
+
+    // Create pie chart if we have vendor data
+    if (Object.keys(vendorData).length > 0) {
+        createVendorPieChart(vendorData);
+    }
+});
+
+function createVendorPieChart(vendorData) {
+    const ctx = document.getElementById('vendorPieChart').getContext('2d');
+
+    // Prepare data for the chart
+    const vendors = Object.keys(vendorData);
+    const amounts = Object.values(vendorData);
+
+    // Generate colors for the chart
+    const colors = generateColors(vendors.length);
+
+    // Create the pie chart
+    const chart = new Chart(ctx, {
+        type: 'pie',
+        data: {
+            labels: vendors,
+            datasets: [{
+                data: amounts,
+                backgroundColor: colors,
+                borderColor: '#ffffff',
+                borderWidth: 2,
+                hoverOffset: 15
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: false // We'll use custom legend
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            const label = context.label || '';
+                            const value = context.raw || 0;
+                            const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                            const percentage = ((value / total) * 100).toFixed(1);
+                            return `${label}: $${value.toFixed(2)} (${percentage}%)`;
+                        }
+                    }
+                }
+            },
+            animation: {
+                animateScale: true,
+                animateRotate: true
+            }
+        }
+    });
+
+    // Create custom legend
+    createCustomLegend(vendors, amounts, colors);
+}
+
+function generateColors(count) {
+    const colorPalette = [
+        '#3B82F6', '#EF4444', '#10B981', '#F59E0B', '#8B5CF6',
+        '#EC4899', '#06B6D4', '#84CC16', '#F97316', '#8B5CF6',
+        '#6366F1', '#14B8A6', '#F43F5E', '#84CC16', '#06B6D4'
+    ];
+
+    const colors = [];
+    for (let i = 0; i < count; i++) {
+        colors.push(colorPalette[i % colorPalette.length]);
+    }
+    return colors;
+}
+
+function createCustomLegend(vendors, amounts, colors) {
+    const legendContainer = document.getElementById('vendorChartLegend');
+    const totalAmount = amounts.reduce((sum, amount) => sum + amount, 0);
+
+    vendors.forEach((vendor, index) => {
+        const amount = amounts[index];
+        const percentage = ((amount / totalAmount) * 100).toFixed(1);
+
+        const legendItem = document.createElement('div');
+        legendItem.className = 'legend-item';
+        legendItem.innerHTML = `
+            <div class="legend-color" style="background-color: ${colors[index]}"></div>
+            <span class="legend-label">${vendor}</span>
+            <span class="legend-value">$${amount.toFixed(2)} (${percentage}%)</span>
+        `;
+
+        legendContainer.appendChild(legendItem);
+    });
+}
+</script>
+{% endblock %}

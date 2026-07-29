@@ -1,0 +1,576 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="hero-section">
+    <div class="hero-content">
+        <h1>AI-Powered Excel Data Extraction</h1>
+        <p>Transform your PDF documents into structured Excel files using advanced AI technology</p>
+    </div>
+</div>
+
+<div class="status-container">
+    <div class="status-card {% if not is_pro and conversion_count >= conversion_limit %}limit-reached{% endif %}">
+        <div class="status-content">
+            <div class="status-icon">
+                <i class="fas fa-bolt"></i>
+            </div>
+            <div class="status-text">
+                <h3>Subscription Status: {% if is_pro %}Pro Plan <span class="pro-badge-main">PRO</span>{% else %}Free
+                    Plan{% endif %}</h3>
+                <p>Usage: <strong>{{ conversion_count }}</strong> / {{ conversion_limit if not is_pro else '∞' }}
+                    conversions used</p>
+                {% if is_pro and pro_expiry %}
+                <p class="expiry-note"><i class="fas fa-calendar-alt"></i> Expires on: <strong>{{
+                        pro_expiry.strftime('%Y-%m-%d') }}</strong></p>
+                {% endif %}
+                {% if not is_pro %}
+                <p class="limit-note"><i class="fas fa-info-circle"></i> Free conversions are limited to the
+                    <strong>first 5 pages</strong>.
+                </p>
+                {% endif %}
+            </div>
+            {% set progress_width = (conversion_count / conversion_limit * 100) if not is_pro and conversion_limit > 0
+            else (100 if is_pro else 0) %}
+            <div class="status-progress">
+                <div class="progress-bar">
+                    <div class="progress-fill" style="--w: {{ progress_width }}%; width: var(--w);">
+                    </div>
+                </div>
+            </div>
+            {% if not is_pro and conversion_count >= conversion_limit %}
+            <div class="upgrade-btn-container">
+                <a href="{{ url_for('cart') }}" class="upgrade-btn">Upgrade to Pro</a>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<div class="upload-section">
+    <div class="upload-card">
+        <div class="card-header">
+            <i class="fas fa-cloud-upload-alt"></i>
+            <h2>Upload Your PDF</h2>
+        </div>
+
+        <form id="uploadForm" action="{{ url_for('upload_file') }}" method="post" enctype="multipart/form-data">
+            <div class="file-input-container">
+                <input type="file" id="fileInput" name="file" accept=".pdf" required>
+                <label for="fileInput" class="file-input-label">
+                    <i class="fas fa-file-pdf"></i>
+                    <span class="file-text">Choose PDF File</span>
+                    <span class="file-size">Max 16MB</span>
+                </label>
+            </div>
+
+            <div class="conversion-options">
+                <h3>Select Conversion Type</h3>
+                <div class="option-cards">
+                    <label class="option-card {% if not is_pro %}pro-locked{% endif %}">
+                        <input type="radio" name="conversion_type" value="scanned" required {% if not is_pro
+                            %}disabled{% endif %}>
+                        <div class="card-content">
+                            {% if not is_pro %}<span class="pro-badge">PRO</span>{% endif %}
+                            <i class="fas fa-camera"></i>
+                            <h4>Scanned PDF</h4>
+                            <p>For image-based PDFs</p>
+                        </div>
+                    </label>
+
+                    <label class="option-card">
+                        <input type="radio" name="conversion_type" value="selectable" required>
+                        <div class="card-content">
+                            <i class="fas fa-mouse-pointer"></i>
+                            <h4>Selectable PDF</h4>
+                            <p>For text-based PDFs</p>
+                        </div>
+                    </label>
+
+                    <label class="option-card">
+                        <input type="radio" name="conversion_type" value="general" required>
+                        <div class="card-content">
+                            <i class="fas fa-star"></i>
+                            <h4>General PDF</h4>
+                            <p>Automatic detection</p>
+                        </div>
+                    </label>
+
+                    <!-- NEW: Custom PDF Converter -->
+                    <label class="option-card custom-option {% if not is_pro %}pro-locked{% endif %}">
+                        <input type="radio" name="conversion_type" value="custom" id="customRadio" required {% if not
+                            is_pro %}disabled{% endif %}>
+                        <div class="card-content">
+                            {% if not is_pro %}<span class="pro-badge">PRO</span>{% endif %}
+                            <i class="fas fa-edit"></i>
+                            <h4>Custom PDF</h4>
+                            <p>Write your own rules</p>
+                        </div>
+                    </label>
+                </div>
+
+                <!-- Custom Prompt Input (Hidden by default) -->
+                <div id="customPromptSection" class="custom-prompt-section" style="display: none;">
+                    <div class="section-header">
+                        <i class="fas fa-keyboard"></i>
+                        <h3>Custom Conversion Instructions</h3>
+                    </div>
+
+                    <div class="prompt-container">
+                        <textarea id="customPrompt" name="custom_prompt"
+                            placeholder="Example: Extract transactions with columns: Date, Description, Amount, Category"
+                            rows="6"></textarea>
+
+                        <div class="char-counter">
+                            <span id="charCount">0</span> characters
+                        </div>
+                    </div>
+
+                    <div class="examples-section">
+                        <h4>Quick Templates:</h4>
+                        <div class="example-buttons">
+                            <button type="button" class="example-btn"
+                                data-prompt="Extract all financial transactions with columns: Date, Description, Amount, Category, Account">
+                                <i class="fas fa-money-bill-wave"></i>
+                                Bank Statement
+                            </button>
+                            <button type="button" class="example-btn"
+                                data-prompt="Convert this invoice with columns: Invoice #, Date, Customer, Item, Quantity, Unit Price, Total">
+                                <i class="fas fa-file-invoice"></i>
+                                Invoice
+                            </button>
+                            <button type="button" class="example-btn"
+                                data-prompt="Extract employee data with columns: Name, Department, Salary, Start Date, Email">
+                                <i class="fas fa-users"></i>
+                                Employee List
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <button type="submit" class="convert-btn" id="convertBtn" {% if not is_pro and conversion_count>=
+                conversion_limit %}disabled{% endif %}>
+                <i class="fas fa-magic"></i>
+                {% if not is_pro and conversion_count >= conversion_limit %}
+                Limit Reached - Upgrade to Continue
+                {% else %}
+                Convert to Excel
+                {% endif %}
+            </button>
+
+            <div id="processingMessage" class="processing-message" style="display: none;">
+                <!-- Soccer Animation Background -->
+                <div class="soccer-pitch">
+                    <div id="robotPlayer" class="robot-player"><i class="fas fa-robot"></i></div>
+                    <div id="soccerBall" class="soccer-ball"><i class="fas fa-futbol"></i></div>
+                </div>
+
+                <div class="spinner-premium">
+                    <i class="fas fa-magic fa-spin"></i>
+                </div>
+                <div class="message-content">
+                    <h4>Processing Your Request</h4>
+                    <p id="mainStatusText" class="processing-status-text">AI is converting your PDF to Excel. This may
+                        take a minute...</p>
+
+                    <div class="progress-bar-container">
+                        <div id="mainProgressBar"></div>
+                    </div>
+
+                    <div class="progress-info">
+                        <span id="mainProgressText">0%</span>
+                        <span id="mainSubStatusText">Initializing engine...</span>
+                    </div>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<style>
+    .status-container {
+        max-width: 800px;
+        margin: -30px auto 30px;
+        padding: 0 20px;
+        position: relative;
+        z-index: 10;
+    }
+
+    .status-card {
+        background: white;
+        padding: 20px 30px;
+        border-radius: 12px;
+        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+        border-left: 5px solid #3498db;
+    }
+
+    .status-card.limit-reached {
+        border-left-color: #e74c3c;
+        background: #fffafa;
+    }
+
+    .status-content {
+        display: flex;
+        align-items: center;
+        gap: 20px;
+        flex-wrap: wrap;
+    }
+
+    .status-icon {
+        width: 50px;
+        height: 50px;
+        background: #eef7ff;
+        color: #3498db;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.5rem;
+    }
+
+    .limit-reached .status-icon {
+        background: #ffeef0;
+        color: #e74c3c;
+    }
+
+    .status-text {
+        flex: 1;
+        min-width: 200px;
+    }
+
+    .status-text h3 {
+        margin: 0;
+        font-size: 1.1rem;
+        color: #2c3e50;
+    }
+
+    .status-text p {
+        margin: 5px 0 0;
+        color: #7f8c8d;
+    }
+
+    .status-progress {
+        flex: 1;
+        min-width: 200px;
+    }
+
+    .progress-bar {
+        height: 10px;
+        background: #eee;
+        border-radius: 5px;
+        overflow: hidden;
+    }
+
+    .progress-fill {
+        height: 100%;
+        background: linear-gradient(90deg, #3498db, #2980b9);
+        border-radius: 5px;
+        transition: width 0.5s ease;
+    }
+
+    .limit-reached .progress-fill {
+        background: #e74c3c;
+    }
+
+    .upgrade-btn {
+        background: #f39c12;
+        color: white;
+        padding: 10px 20px;
+        border-radius: 6px;
+        text-decoration: none;
+        font-weight: 600;
+        transition: all 0.2s;
+        white-space: nowrap;
+    }
+
+    .upgrade-btn:hover {
+        background: #e67e22;
+        transform: translateY(-2px);
+        box-shadow: 0 4px 10px rgba(243, 156, 18, 0.3);
+    }
+
+    .convert-btn:disabled {
+        background: #95a5a6;
+        cursor: not-allowed;
+        transform: none !important;
+        box-shadow: none !important;
+    }
+
+    /* PRO Features Styling */
+    .pro-badge {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        background: #f39c12;
+        color: white;
+        font-size: 0.7rem;
+        padding: 2px 8px;
+        border-radius: 10px;
+        font-weight: bold;
+        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        z-index: 10;
+    }
+
+    .pro-badge-main {
+        background: linear-gradient(135deg, #f1c40f, #f39c12);
+        color: #1a1a2e;
+        font-size: 0.85rem;
+        padding: 4px 12px;
+        border-radius: 50px;
+        margin-left: 10px;
+        vertical-align: middle;
+        font-weight: 800;
+        box-shadow: 0 2px 10px rgba(243, 156, 18, 0.4);
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .pro-locked {
+        opacity: 0.8;
+        cursor: not-allowed !important;
+        position: relative;
+        border-style: dashed !important;
+    }
+
+    .pro-locked:hover {
+        transform: none !important;
+        border-color: #ddd !important;
+    }
+
+    .option-card.pro-locked h4,
+    .option-card.pro-locked p {
+        color: #95a5a6;
+    }
+
+    .limit-note {
+        font-size: 0.85rem;
+        color: #e67e22 !important;
+        margin-top: 8px !important;
+        font-style: italic;
+    }
+
+    .expiry-note {
+        font-size: 0.85rem;
+        color: #10b981 !important;
+        margin-top: 5px !important;
+    }
+
+    /* PREMIUM PROGRESS BAR STYLES */
+    .processing-message {
+        margin-top: 35px;
+        background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+        border-radius: 20px;
+        padding: 40px 30px;
+        box-shadow: 0 15px 45px rgba(79, 70, 229, 0.4);
+        display: none;
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+        gap: 15px;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        animation: premiumSlideIn 0.6s cubic-bezier(0.23, 1, 0.32, 1);
+        z-index: 100;
+        color: white;
+        overflow: hidden;
+        /* Hide the robot running out of bounds */
+        position: relative;
+    }
+
+    /* SOCCER ANIMATION STYLES */
+    .soccer-pitch {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+        z-index: 1;
+        opacity: 0.3;
+        /* Subtle background play */
+    }
+
+    .robot-player {
+        position: absolute;
+        font-size: 2rem;
+        color: white;
+        transition: transform 0.1s linear;
+        filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.2));
+    }
+
+    .soccer-ball {
+        position: absolute;
+        font-size: 1.2rem;
+        color: #fff;
+        filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+    }
+
+    .message-content {
+        position: relative;
+        z-index: 10;
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .processing-message h4 {
+        color: white;
+        font-size: 1.25rem;
+        font-weight: 800;
+        margin-bottom: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        width: 100%;
+        text-align: center;
+    }
+
+    .processing-status-text {
+        color: rgba(255, 255, 255, 0.9);
+        font-size: 0.95rem;
+        font-weight: 500;
+        margin-bottom: 20px;
+        display: block;
+        text-align: center;
+        max-width: 90%;
+        /* Prevent edge-to-edge stretching */
+    }
+
+    .processing-message h4::after {
+        content: '';
+        width: 8px;
+        height: 8px;
+        background: #10b981;
+        border-radius: 50%;
+        display: inline-block;
+        animation: pulse-glow 1.5s infinite;
+    }
+
+    @keyframes pulse-glow {
+        0% {
+            transform: scale(1);
+            box-shadow: 0 0 0 0 rgba(79, 70, 229, 0.7);
+        }
+
+        70% {
+            transform: scale(1.2);
+            box-shadow: 0 0 0 10px rgba(79, 70, 229, 0);
+        }
+
+        100% {
+            transform: scale(1);
+            box-shadow: 0 0 0 0 rgba(79, 70, 229, 0);
+        }
+    }
+
+    @keyframes premiumSlideIn {
+        from {
+            opacity: 0;
+            transform: translateY(30px);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+
+    .progress-bar-container {
+        margin: 20px 0 10px 0;
+        width: 100%;
+        height: 18px;
+        background: #f1f5f9;
+        border-radius: 50px;
+        overflow: hidden;
+        position: relative;
+        border: 1px solid #e2e8f0;
+    }
+
+    #mainProgressBar {
+        width: 0%;
+        height: 100%;
+        background: linear-gradient(90deg, #4f46e5, #0ea5e9, #10b981);
+        background-size: 200% 100%;
+        animation: gradient-move 2s linear infinite;
+        transition: width 0.4s cubic-bezier(0.1, 0.7, 0.1, 1);
+        border-radius: 50px;
+        position: relative;
+        box-shadow: 0 0 15px rgba(79, 70, 229, 0.3);
+    }
+
+    #mainProgressBar::after {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: linear-gradient(90deg,
+                rgba(255, 255, 255, 0) 0%,
+                rgba(255, 255, 255, 0.3) 50%,
+                rgba(255, 255, 255, 0) 100%);
+        animation: shine 1.5s infinite;
+    }
+
+    @keyframes shine {
+        0% {
+            transform: translateX(-100%);
+        }
+
+        100% {
+            transform: translateX(100%);
+        }
+    }
+
+    @keyframes gradient-move {
+        0% {
+            background-position: 100% 0%;
+        }
+
+        100% {
+            background-position: -100% 0%;
+        }
+    }
+
+    .progress-info {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        margin-top: 15px;
+        gap: 8px;
+    }
+
+    #mainProgressText {
+        font-size: 1rem;
+        font-weight: 800;
+        color: white;
+        font-variant-numeric: tabular-nums;
+    }
+
+    #mainSubStatusText {
+        font-size: 0.85rem;
+        color: white;
+        font-weight: 500;
+        letter-spacing: 0.02em;
+    }
+
+    .spinner-premium {
+        width: 50px;
+        height: 50px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(255, 255, 255, 0.15);
+        border-radius: 12px;
+        color: white;
+        font-size: 1.5rem;
+        flex-shrink: 0;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+</style>
+{% endblock %}
