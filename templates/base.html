@@ -33,8 +33,6 @@
 
             {% if current_user.is_authenticated %}
             <div class="nav-links">
-                <a href="{{ url_for('dashboard') }}" class="nav-link"
-                   {% if request.endpoint == 'dashboard' %}aria-current="page"{% endif %}>Convert</a>
                 {% if not current_user.is_pro %}
                 <a href="{{ url_for('cart') }}" class="nav-link"
                    {% if request.endpoint == 'cart' %}aria-current="page"{% endif %}>Upgrade</a>
