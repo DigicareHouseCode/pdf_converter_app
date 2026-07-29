@@ -4,87 +4,97 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Excel Automation</title>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap"
-        rel="stylesheet">
+    <title>{% block title %}Excel Automation{% endblock %}</title>
+    <meta name="description" content="{% block description %}Convert PDF bank statements and invoices into structured Excel files.{% endblock %}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="shortcut icon" href="{{ url_for('static', filename='images/favicon.ico') }}" type="image/x-icon">
+    <script>
+        // Applied before first paint so the correct theme renders immediately.
+        (function () {
+            try {
+                var t = localStorage.getItem('theme');
+                if (t) document.documentElement.setAttribute('data-theme', t);
+            } catch (e) { }
+        })();
+    </script>
 </head>
 
 <body>
+    {% from "_icons.html" import icon %}
+
     <nav class="navbar">
         <div class="nav-container">
-            <div class="nav-branding">
-                <a href="https://digicareproducts.com/" target="_blank" class="logo-link">
-                    <img src="{{ url_for('static', filename='images/digicare-logo.png') }}" alt="DigiCare Products Logo"
-                        class="nav-logo-image">
-                </a>
-                <span class="powered-by">Powered by DigiCare Products</span>
-            </div>
+            <a href="{{ url_for('index') }}" class="nav-brand">
+                <img src="{{ url_for('static', filename='images/digicare-logo.png') }}" alt=""
+                     class="nav-logo-image">
+                <span class="nav-brand-text">Excel Automation</span>
+            </a>
 
-            <div class="nav-slogan">
-                <span>"We can do what GPT cannot do"</span>
+            {% if current_user.is_authenticated %}
+            <div class="nav-links">
+                <a href="{{ url_for('dashboard') }}" class="nav-link"
+                   {% if request.endpoint == 'dashboard' %}aria-current="page"{% endif %}>Convert</a>
+                {% if not current_user.is_pro %}
+                <a href="{{ url_for('cart') }}" class="nav-link"
+                   {% if request.endpoint == 'cart' %}aria-current="page"{% endif %}>Upgrade</a>
+                {% endif %}
             </div>
+            {% endif %}
 
             <div class="nav-actions">
+                <button type="button" class="icon-btn theme-toggle" id="themeToggle"
+                        aria-label="Switch between light and dark theme">
+                    <span class="icon-sun">{{ icon('sun', 17) }}</span>
+                    <span class="icon-moon">{{ icon('moon', 17) }}</span>
+                </button>
+
                 {% if current_user.is_authenticated %}
                 <div class="nav-user">
                     {% if current_user.picture_url %}
-                    <img src="{{ current_user.picture_url }}" alt="Profile" class="user-avatar"
-                        onerror="this.src='https://ui-avatars.com/api/?name={{ current_user.name or current_user.username }}&background=4f46e5&color=fff'">
+                    <img src="{{ current_user.picture_url }}" alt="" class="user-avatar" referrerpolicy="no-referrer">
                     {% else %}
-                    <div class="user-avatar-placeholder">
-                        <i class="fas fa-user"></i>
-                    </div>
+                    <span class="user-avatar-placeholder">{{ icon('user', 15) }}</span>
                     {% endif %}
                     <span class="username">{{ current_user.name or current_user.username }}</span>
-                    <!-- Link to Dashboard if on Landing Page -->
-                    <a href="{{ url_for('dashboard') }}" class="dashboard-link"
-                        style="text-decoration:none; color:#4f46e5; font-weight:600; font-size:0.9rem; margin-right:5px;">Dashboard</a>
-                    <a href="{{ url_for('logout') }}" class="logout-btn">
-                        <i class="fas fa-sign-out-alt"></i>
-                        <span>Logout</span>
-                    </a>
                 </div>
+                <a href="{{ url_for('logout') }}" class="icon-btn" aria-label="Log out" title="Log out">
+                    {{ icon('log-out', 17) }}
+                </a>
                 {% else %}
-                <div class="auth-links">
-                    <a href="{{ url_for('index') }}#pricing" class="login-link-nav" style="margin-right: 0.5rem;">Buy
-                        Now</a>
-                    <a href="{{ url_for('login') }}" class="signup-btn-nav">Try Free</a>
-                </div>
+                <a href="{{ url_for('login') }}" class="btn btn--ghost">Log in</a>
+                <a href="{{ url_for('signup') }}" class="btn btn--primary">Get started</a>
                 {% endif %}
             </div>
         </div>
     </nav>
 
-
-
-    <div class="container">
+    {% block body %}
+    <main class="container {% block container_class %}{% endblock %}">
         {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
         {% for category, message in messages %}
-        <div class="alert alert-{{ category }} {% if 'already a Pro user' in message %}alert-pro-premium{% endif %}">
-            {% if 'already a Pro user' in message %}
-            <i class="fas fa-crown premium-icon"></i>
-            {% endif %}
-            {{ message }}
+        <div class="alert alert-{{ category }}" role="alert">
+            {% if category == 'success' %}{{ icon('check-circle', 16) }}
+            {% elif category == 'error' %}{{ icon('alert', 16) }}
+            {% else %}{{ icon('info', 16) }}{% endif %}
+            <span>{{ message }}</span>
         </div>
         {% endfor %}
         {% endif %}
         {% endwith %}
 
         {% block content %}{% endblock %}
-    </div>
+    </main>
+    {% endblock %}
 
     <footer class="footer">
         <div class="footer-content">
-            <p>&copy; 2025 Excel Automation. Powered by DigiCare Products</p>
+            <span>&copy; {{ 2026 }} Excel Automation — Powered by DigiCare Products</span>
+            <a href="https://digicareproducts.com/" target="_blank" rel="noopener">digicareproducts.com</a>
         </div>
     </footer>
 
     <script>
-        // Define the app root path dynamically for JS fetch calls
         window.APP_ROOT = "{{ url_for('index') }}".replace(/\/$/, "");
     </script>
     <script src="{{ url_for('static', filename='js/script.js') }}"></script>

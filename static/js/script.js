@@ -1,343 +1,232 @@
+/* Excel Automation — UI behaviour
+   No external dependencies. Icons are inline SVG to match the server-rendered set. */
 
-document.addEventListener('DOMContentLoaded', function () {
-    // Select elements
-    const fileInput = document.getElementById('fileInput');
-    const fileLabel = document.querySelector('.file-input-label');
-    const convertBtn = document.getElementById('convertBtn');
-    const uploadForm = document.getElementById('uploadForm');
-    const processingMessage = document.getElementById('processingMessage');
-    const customPromptSection = document.getElementById('customPromptSection');
-    const customPromptTextarea = document.getElementById('customPrompt');
-    const charCount = document.getElementById('charCount');
-    const uploadCard = document.querySelector('.upload-card');
+(function () {
+    'use strict';
 
-    // --- File Input Logic ---
+    var SVG = {
+        upload: '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
+        file: '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>',
+        sparkle: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.6L19.5 10l-5.6 1.9L12 17.5l-1.9-5.6L4.5 10l5.6-1.4L12 3z"/></svg>',
+        alert: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>'
+    };
+
+    function esc(s) {
+        return String(s).replace(/[&<>"']/g, function (c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+        });
+    }
+
+    /* ---------- theme ---------- */
+
+    var themeToggle = document.getElementById('themeToggle');
+    if (themeToggle) {
+        themeToggle.addEventListener('click', function () {
+            var root = document.documentElement;
+            var current = root.getAttribute('data-theme');
+            if (!current) {
+                current = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+            }
+            var next = current === 'dark' ? 'light' : 'dark';
+            root.setAttribute('data-theme', next);
+            try { localStorage.setItem('theme', next); } catch (e) { }
+        });
+    }
+
+    /* ---------- FAQ ---------- */
+
+    document.querySelectorAll('.faq-question').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            var item = btn.closest('.faq-item');
+            var open = item.classList.toggle('is-open');
+            btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+        });
+    });
+
+    /* ---------- upload form ---------- */
+
+    var fileInput = document.getElementById('fileInput');
+    var fileLabel = document.querySelector('.file-input-label');
+    var convertBtn = document.getElementById('convertBtn');
+    var uploadForm = document.getElementById('uploadForm');
+    var processingPanel = document.getElementById('processingMessage');
+    var promptSection = document.getElementById('customPromptSection');
+    var promptField = document.getElementById('customPrompt');
+    var charCount = document.getElementById('charCount');
+
+    if (!uploadForm) return;
+
+    function setLabel(name, sizeText, selected) {
+        fileLabel.innerHTML =
+            (selected ? SVG.file : SVG.upload) +
+            '<span class="file-text">' + esc(name) + '</span>' +
+            '<span class="file-size">' + esc(sizeText) + '</span>';
+        fileLabel.classList.toggle('file-selected', selected);
+    }
+
+    function resetLabel() {
+        setLabel('Choose a PDF or drag it here', 'PDF only', false);
+    }
+
     if (fileInput) {
         fileInput.addEventListener('change', function () {
-            if (this.files.length > 0) {
-                const file = this.files[0];
-                const fileName = file.name;
-                const fileSize = (file.size / 1024 / 1024).toFixed(2);
-
-                // Update file label
-                fileLabel.innerHTML = `
-                    <i class="fas fa-file-pdf"></i>
-                    <span class="file-text">${fileName}</span>
-                    <span class="file-size">${fileSize} MB</span>
-                `;
-                fileLabel.classList.add('file-selected');
-                fileLabel.style.borderColor = '#10b981';
-                fileLabel.style.background = '#f0fdf4';
-
+            if (this.files.length) {
+                var f = this.files[0];
+                setLabel(f.name, (f.size / 1024 / 1024).toFixed(1) + ' MB', true);
                 removeError();
             } else {
-                resetFileLabel();
+                resetLabel();
             }
         });
     }
 
-    function resetFileLabel() {
-        if (fileLabel) {
-            fileLabel.innerHTML = `
-                <i class="fas fa-file-pdf"></i>
-                <span class="file-text">Choose PDF File</span>
-                <span class="file-size">Max 16MB</span>
-            `;
-            fileLabel.classList.remove('file-selected');
-            fileLabel.style.borderColor = '#4f46e5';
-            fileLabel.style.background = '#f8faff';
-        }
-    }
-
-    // --- Drag and Drop ---
+    /* drag and drop */
     if (fileLabel) {
-        fileLabel.addEventListener('dragover', function (e) {
-            e.preventDefault();
-            this.style.borderColor = '#4f46e5';
-            this.style.background = '#f0f4ff';
+        ['dragenter', 'dragover'].forEach(function (evt) {
+            fileLabel.addEventListener(evt, function (e) {
+                e.preventDefault();
+                fileLabel.classList.add('is-dragging');
+            });
         });
-
-        fileLabel.addEventListener('dragleave', function (e) {
-            e.preventDefault();
-            if (!this.contains(e.relatedTarget)) {
-                this.style.borderColor = '#4f46e5';
-                this.style.background = '#f8faff';
-            }
+        ['dragleave', 'drop'].forEach(function (evt) {
+            fileLabel.addEventListener(evt, function (e) {
+                e.preventDefault();
+                if (evt === 'dragleave' && fileLabel.contains(e.relatedTarget)) return;
+                fileLabel.classList.remove('is-dragging');
+            });
         });
-
         fileLabel.addEventListener('drop', function (e) {
-            e.preventDefault();
-            const files = e.dataTransfer.files;
-            if (files.length > 0) {
-                fileInput.files = files;
+            if (e.dataTransfer.files.length) {
+                fileInput.files = e.dataTransfer.files;
                 fileInput.dispatchEvent(new Event('change'));
             }
         });
     }
 
-    // --- Custom Prompt Logic ---
-    if (customPromptTextarea) {
-        charCount.textContent = customPromptTextarea.value.length;
+    /* custom mode */
+    function syncMode() {
+        var selected = document.querySelector('input[name="conversion_type"]:checked');
+        var isCustom = selected && selected.value === 'custom';
+        if (promptSection) promptSection.hidden = !isCustom;
+        if (convertBtn && !convertBtn.disabled) {
+            convertBtn.innerHTML = SVG.sparkle + ' ' + (isCustom ? 'Convert with my rules' : 'Convert to Excel');
+        }
+    }
+    document.querySelectorAll('input[name="conversion_type"]').forEach(function (r) {
+        r.addEventListener('change', syncMode);
+    });
+    syncMode();
 
-        customPromptTextarea.addEventListener('input', function () {
-            const count = this.value.length;
-            charCount.textContent = count;
-            if (count < 20) charCount.style.color = '#dc2626';
-            else if (count < 50) charCount.style.color = '#f59e0b';
-            else charCount.style.color = '#10b981';
-        });
-
-        // Initialize display based on radio buttons
-        const updateCustomUI = () => {
-            const selected = document.querySelector('input[name="conversion_type"]:checked');
-            if (selected && selected.value === 'custom') {
-                customPromptSection.style.display = 'block';
-                convertBtn.innerHTML = '<i class="fas fa-wand-magic-sparkles"></i> Convert with Custom Rules';
-                uploadCard.classList.add('custom-mode');
-            } else {
-                customPromptSection.style.display = 'none';
-                convertBtn.innerHTML = '<i class="fas fa-magic"></i> Convert to Excel';
-                uploadCard.classList.remove('custom-mode');
-            }
-        };
-
-        document.querySelectorAll('input[name="conversion_type"]').forEach(radio => {
-            radio.addEventListener('change', updateCustomUI);
-        });
+    if (promptField && charCount) {
+        var updateCount = function () { charCount.textContent = promptField.value.length; };
+        promptField.addEventListener('input', updateCount);
+        updateCount();
     }
 
-    // Example buttons
-    document.querySelectorAll('.example-btn').forEach(btn => {
+    document.querySelectorAll('.example-btn').forEach(function (btn) {
         btn.addEventListener('click', function () {
-            customPromptTextarea.value = this.dataset.prompt;
-            customPromptTextarea.dispatchEvent(new Event('input'));
-            customPromptTextarea.focus();
+            if (!promptField) return;
+            promptField.value = this.dataset.prompt;
+            promptField.dispatchEvent(new Event('input'));
+            promptField.focus();
         });
     });
 
-    // --- Form Submission & Polling ---
-    if (uploadForm) {
-        uploadForm.addEventListener('submit', function (e) {
-            e.preventDefault();
+    /* ---------- submit + progress ---------- */
 
-            const file = fileInput.files[0];
-            const selectedConversion = document.querySelector('input[name="conversion_type"]:checked');
+    var progressBar = document.getElementById('mainProgressBar');
+    var progressText = document.getElementById('mainProgressText');
+    var subStatus = document.getElementById('mainSubStatusText');
 
-            // Validation
-            if (!file) {
-                showError('Please select a PDF file');
-                return;
-            }
-            if (!selectedConversion) {
-                showError('Please select a conversion type');
-                return;
-            }
-            if (selectedConversion.value === 'custom' && !customPromptTextarea.value.trim()) {
-                showError('Please enter custom instructions');
-                customPromptTextarea.focus();
-                return;
-            }
+    uploadForm.addEventListener('submit', function (e) {
+        e.preventDefault();
 
-            // Show Processing UI
-            processingMessage.style.display = 'flex';
-            convertBtn.disabled = true;
-            convertBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
+        var selected = document.querySelector('input[name="conversion_type"]:checked');
 
-            // Submit
-            const formData = new FormData(this);
-            fetch(this.action, {
-                method: 'POST',
-                body: formData,
-                headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        if (!fileInput.files.length) { return showError('Choose a PDF file to convert.'); }
+        if (!selected) { return showError('Pick a conversion mode.'); }
+        if (selected.value === 'custom' && !promptField.value.trim()) {
+            showError('Describe the columns you want extracted.');
+            promptField.focus();
+            return;
+        }
+
+        processingPanel.classList.add('is-active');
+        convertBtn.disabled = true;
+        convertBtn.textContent = 'Converting…';
+
+        fetch(this.action, {
+            method: 'POST',
+            body: new FormData(this),
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        })
+            .then(function (res) {
+                if (res.redirected) { window.location.href = res.url; return null; }
+                var ct = res.headers.get('content-type') || '';
+                if (ct.indexOf('application/json') === -1) {
+                    throw new Error('Server returned ' + res.status);
+                }
+                return res.json();
             })
-                .then(res => {
-                    if (res.redirected) {
-                        window.location.href = res.url;
-                        return;
-                    }
-                    const contentType = res.headers.get("content-type");
-                    if (contentType && contentType.indexOf("application/json") !== -1) {
-                        return res.json();
-                    } else {
-                        // Handle non-JSON response (e.g. 502 Bad Gateway HTML)
-                        throw new Error(`Server returned ${res.status}: ${res.statusText}`);
-                    }
-                })
-                .then(data => {
-                    if (!data) return;
-                    if (data.task_id) {
-                        startPolling(data.task_id);
-                    } else if (data.error) {
-                        showError(data.error);
-                        resetUI();
-                    }
-                })
-                .catch(err => {
-                    console.error('Upload error:', err);
-                    showError('Upload failed. Please try again.');
-                    resetUI();
-                });
-        });
-    }
+            .then(function (data) {
+                if (!data) return;
+                if (data.task_id) { poll(data.task_id); }
+                else { showError(data.error || 'The upload did not start. Try again.'); resetUI(); }
+            })
+            .catch(function () {
+                showError('The upload failed. Check your connection and try again.');
+                resetUI();
+            });
+    });
 
-    function startPolling(taskId) {
-        const progressBar = document.getElementById('mainProgressBar');
-        const progressText = document.getElementById('mainProgressText');
-        const subStatusText = document.getElementById('mainSubStatusText');
-
-        const pollInterval = setInterval(() => {
-            fetch(`${window.APP_ROOT || ''}/progress/${taskId}`)
-                .then(res => {
-                    const contentType = res.headers.get("content-type");
-                    if (contentType && contentType.indexOf("application/json") !== -1) {
-                        return res.json();
-                    } else {
-                        throw new Error(`Server returned ${res.status}`);
-                    }
+    function poll(taskId) {
+        var root = window.APP_ROOT || '';
+        var timer = setInterval(function () {
+            fetch(root + '/progress/' + taskId)
+                .then(function (res) {
+                    var ct = res.headers.get('content-type') || '';
+                    if (ct.indexOf('application/json') === -1) throw new Error('bad response');
+                    return res.json();
                 })
-                .then(data => {
+                .then(function (data) {
                     if (!data) return;
-                    const progress = Math.round(data.progress || 0);
-                    if (progressBar) progressBar.style.width = `${progress}%`;
-                    if (progressText) progressText.textContent = `${progress}%`;
-                    if (subStatusText && data.message) subStatusText.textContent = data.message;
+                    var pct = Math.round(data.progress || 0);
+                    if (progressBar) progressBar.style.width = pct + '%';
+                    if (progressText) progressText.textContent = pct + '%';
+                    if (subStatus && data.message) subStatus.textContent = data.message;
 
                     if (data.status === 'completed') {
-                        clearInterval(pollInterval);
-                        if (subStatusText) subStatusText.textContent = 'Success! Redirecting...';
-                        setTimeout(() => window.location.href = `${window.APP_ROOT || ''}/result/${taskId}`, 800);
+                        clearInterval(timer);
+                        if (subStatus) subStatus.textContent = 'Done. Taking you to your file…';
+                        setTimeout(function () { window.location.href = root + '/result/' + taskId; }, 600);
                     } else if (data.status === 'failed') {
-                        clearInterval(pollInterval);
-                        showError('Conversion failed: ' + (data.message || 'Unknown error'));
+                        clearInterval(timer);
+                        showError(data.message || 'The conversion failed.');
                         resetUI();
                     }
                 })
-                .catch(err => console.error('Polling error:', err));
+                .catch(function () { /* transient — keep polling */ });
         }, 1000);
     }
 
     function resetUI() {
-        if (processingMessage) processingMessage.style.display = 'none';
-        if (convertBtn) {
-            convertBtn.disabled = false;
-            const selected = document.querySelector('input[name="conversion_type"]:checked');
-            convertBtn.innerHTML = (selected && selected.value === 'custom')
-                ? '<i class="fas fa-wand-magic-sparkles"></i> Convert with Custom Rules'
-                : '<i class="fas fa-magic"></i> Convert to Excel';
-        }
+        if (processingPanel) processingPanel.classList.remove('is-active');
+        if (convertBtn) { convertBtn.disabled = false; syncMode(); }
     }
 
-    // --- Internal Helpers ---
     function showError(message) {
         removeError();
-        const errorDiv = document.createElement('div');
-        errorDiv.className = 'error-message';
-        errorDiv.innerHTML = `
-            <i class="fas fa-exclamation-circle"></i>
-            <div class="error-details">
-                <strong>Action Required</strong>
-                <span>${message}</span>
-            </div>
-        `;
-        // Insert after file label for visibility
-        fileLabel.insertAdjacentElement('afterend', errorDiv);
-        setTimeout(removeError, 5000);
+        var div = document.createElement('div');
+        div.className = 'error-message';
+        div.setAttribute('role', 'alert');
+        div.innerHTML = SVG.alert +
+            '<span class="error-details"><strong>Check this first</strong><span>' + esc(message) + '</span></span>';
+        fileLabel.insertAdjacentElement('afterend', div);
+        setTimeout(removeError, 6000);
     }
 
     function removeError() {
-        const existing = document.querySelector('.error-message');
+        var existing = uploadForm.querySelector('.error-message');
         if (existing) existing.remove();
     }
-
-    // --- Robot Soccer Physics Engine ---
-    function initRobotSoccer() {
-        const pitch = document.querySelector('.soccer-pitch');
-        const robot = document.getElementById('robotPlayer');
-        const ball = document.getElementById('soccerBall');
-        const processingMsg = document.getElementById('processingMessage');
-        if (!pitch || !robot || !ball || !processingMsg) return;
-
-        let pitchW = pitch.clientWidth || 600;
-        let pitchH = pitch.clientHeight || 200;
-
-        // Physics State
-        let ballX = pitchW / 2;
-        let ballY = pitchH / 2;
-        let ballVX = 0;
-        let ballVY = 0;
-        let robotX = 50;
-        let robotY = 50;
-
-        const friction = 0.985;
-        const bounce = 0.7;
-        const robotSpeed = 3.2;
-
-        function update() {
-            // Keep running physics even if display is none (or stop, up to you)
-            // But if hidden, we shouldn't waste too much CPU
-            if (getComputedStyle(processingMsg).display === 'none') {
-                requestAnimationFrame(update);
-                return;
-            }
-
-            pitchW = pitch.clientWidth;
-            pitchH = pitch.clientHeight;
-
-            // 1. Ball Physics
-            ballVX *= friction;
-            ballVY *= friction;
-
-            ballX += ballVX;
-            ballY += ballVY;
-
-            // Wall Bounces
-            if (ballX <= 10) { ballX = 10; ballVX *= -bounce; }
-            if (ballX >= pitchW - 30) { ballX = pitchW - 30; ballVX *= -bounce; }
-            if (ballY <= 10) { ballY = 10; ballVY *= -bounce; }
-            if (ballY >= pitchH - 30) { ballY = pitchH - 30; ballVY *= -bounce; }
-
-            // 2. Robot AI (Chase Ball like human)
-            const dx = ballX - robotX;
-            const dy = ballY - robotY;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-
-            if (dist > 35) {
-                robotX += (dx / dist) * robotSpeed;
-                robotY += (dy / dist) * robotSpeed;
-
-                // Rotation towards ball
-                const angle = Math.atan2(dy, dx) * (180 / Math.PI);
-                robot.style.transform = `rotate(${angle}deg)`;
-            } else {
-                // KICK!
-                const force = 12 + Math.random() * 8;
-                const angle = (Math.random() - 0.5) * 2 * Math.PI;
-                ballVX = Math.cos(angle) * force;
-                ballVY = Math.sin(angle) * force;
-
-                // Animation feedback
-                const currentAngle = Math.atan2(dy, dx) * (180 / Math.PI);
-                robot.style.transition = 'transform 0.1s ease-out';
-                robot.style.transform = `rotate(${currentAngle}deg) scale(1.15)`;
-
-                setTimeout(() => {
-                    robot.style.transition = 'none';
-                    robot.style.transform = `rotate(${currentAngle}deg) scale(1)`;
-                }, 150);
-            }
-
-            // Update DOM
-            ball.style.left = ballX + 'px';
-            ball.style.top = ballY + 'px';
-            robot.style.left = robotX + 'px';
-            robot.style.top = robotY + 'px';
-
-            requestAnimationFrame(update);
-        }
-
-        requestAnimationFrame(update);
-    }
-
-    // Call init when dashboard is ready
-    initRobotSoccer();
-});
+})();

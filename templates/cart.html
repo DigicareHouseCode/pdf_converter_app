@@ -1,253 +1,86 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
+
+{% block title %}Upgrade to Professional — Excel Automation{% endblock %}
 
 {% block content %}
-<style>
-    .cart-container {
-        max-width: 1000px;
-        margin: 40px auto;
-        padding: 20px;
-        animation: fadeIn 0.8s ease-out;
-    }
+<div class="page-head">
+    <h1>Upgrade to Professional</h1>
+    <p>Unlimited conversions, unlimited pages, and the scanned and custom modes.</p>
+</div>
 
-    .cart-header {
-        text-align: center;
-        margin-bottom: 40px;
-    }
+<div class="split">
 
-    .cart-header h1 {
-        font-size: 2.5rem;
-        color: #0f172a;
-        font-weight: 800;
-        margin-bottom: 10px;
-    }
+    <!-- Order summary -->
+    <div class="card stack">
+        <div class="card-head">
+            <h2>Order summary</h2>
+        </div>
 
-    .cart-header p {
-        color: #ffffff;
-        font-size: 1.1rem;
-    }
+        <div class="line-item">
+            <div>
+                <h3>Professional plan</h3>
+                <p>Billed monthly. Cancel any time.</p>
+            </div>
+            <span class="line-price">${{ "%.2f"|format(price) }}</span>
+        </div>
 
-    .cart-grid {
-        display: grid;
-        grid-template-columns: 1fr 350px;
-        gap: 30px;
-    }
+        <ul class="feature-list">
+            <li class="yes">{{ icon('check', 15) }} Unlimited conversions</li>
+            <li class="yes">{{ icon('check', 15) }} No page limit per file</li>
+            <li class="yes">{{ icon('check', 15) }} Scanned and custom extraction modes</li>
+            <li class="yes">{{ icon('check', 15) }} Priority processing</li>
+        </ul>
 
-    @media (max-width: 900px) {
-        .cart-grid {
-            grid-template-columns: 1fr;
-        }
-    }
+        <div class="total-row">
+            <span class="total-label">Total due today</span>
+            <span class="total-amount">${{ "%.2f"|format(price) }}</span>
+        </div>
 
-    .order-summary,
-    .payment-methods {
-        background: white;
-        border-radius: 20px;
-        padding: 30px;
-        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
-        border: 1px solid #e2e8f0;
-    }
-
-    .summary-item {
-        display: flex;
-        justify-content: space-between;
-        margin-bottom: 20px;
-        padding-bottom: 20px;
-        border-bottom: 1px solid #f1f5f9;
-    }
-
-    .summary-item:last-child {
-        border-bottom: none;
-        margin-bottom: 0;
-        padding-bottom: 0;
-    }
-
-    .item-info h3 {
-        font-size: 1.25rem;
-        color: #1e293b;
-        margin-bottom: 5px;
-    }
-
-    .item-info p {
-        color: #64748b;
-        font-size: 0.95rem;
-    }
-
-    .item-price {
-        font-size: 1.5rem;
-        font-weight: 700;
-        color: #4f46e5;
-    }
-
-    .total-section {
-        margin-top: 30px;
-        padding-top: 20px;
-        border-top: 2px solid #e2e8f0;
-    }
-
-    .total-row {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-    }
-
-    .total-label {
-        font-size: 1.1rem;
-        font-weight: 600;
-        color: #1e293b;
-    }
-
-    .total-amount {
-        font-size: 2rem;
-        font-weight: 800;
-        color: #0f172a;
-    }
-
-    .payment-methods h2 {
-        font-size: 1.25rem;
-        margin-bottom: 25px;
-        color: #1e293b;
-    }
-
-    .payment-option {
-        margin-bottom: 20px;
-    }
-
-    .stripe-btn {
-        background: #6366f1;
-        color: white;
-        width: 100%;
-        padding: 15px;
-        border-radius: 12px;
-        border: none;
-        font-size: 1.1rem;
-        font-weight: 600;
-        cursor: pointer;
-        transition: all 0.3s ease;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 10px;
-        margin-bottom: 15px;
-        text-decoration: none;
-    }
-
-    .stripe-btn:hover {
-        background: #4f46e5;
-        transform: translateY(-2px);
-        box-shadow: 0 10px 20px rgba(99, 102, 241, 0.2);
-    }
-
-    .paypal-container {
-        margin-top: 10px;
-    }
-
-    .secure-badge {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 8px;
-        color: #64748b;
-        font-size: 0.85rem;
-        margin-top: 30px;
-    }
-
-    .secure-badge i {
-        color: #10b981;
-    }
-
-    @keyframes fadeIn {
-        from {
-            opacity: 0;
-            transform: translateY(20px);
-        }
-
-        to {
-            opacity: 1;
-            transform: translateY(0);
-        }
-    }
-</style>
-
-<div class="cart-container">
-    <div class="cart-header">
-        <h1>Complete Your Upgrade</h1>
-        <p>Unlock ultimate power for your PDF workflow</p>
+        <div class="secure-note">
+            {{ icon('lock', 14) }}
+            <span>Payment is handled by Stripe and PayPal. We never see your card details.</span>
+        </div>
     </div>
 
-    <div class="cart-grid">
-        <div class="order-summary">
-            <h2>Order Summary</h2>
-            <div class="summary-item">
-                <div class="item-info">
-                    <h3>Professional Plan (Monthly)</h3>
-                    <p>Unlimited conversions, unlimited pages, and priority processing.</p>
-                </div>
-                <div class="item-price">${{ "%.2f"|format(price) }}</div>
-            </div>
-
-            <div class="total-section">
-                <div class="total-row">
-                    <span class="total-label">Total Amount:</span>
-                    <span class="total-amount">${{ "%.2f"|format(price) }}</span>
-                </div>
-            </div>
-
-            <div class="secure-badge">
-                <i class="fas fa-shield-alt"></i>
-                <span>SSL Secure Checkout • Data Encrypted</span>
-            </div>
+    <!-- Payment -->
+    <div class="card stack">
+        <div class="card-head">
+            <h2>Payment method</h2>
         </div>
 
-        <div class="payment-methods">
-            <h2>Choose Payment Method</h2>
+        <a href="{{ url_for('create_checkout_session') }}" class="btn btn--primary btn--block btn--lg">
+            {{ icon('card', 17) }} Pay by card
+        </a>
 
-            <div class="payment-option">
-                <a href="{{ url_for('create_checkout_session') }}" class="stripe-btn">
-                    <i class="fab fa-stripe"></i>
-                    Pay with Card (Stripe)
-                </a>
-            </div>
+        <div class="divider"><span>or</span></div>
 
-            <div class="payment_option">
-                <div id="paypal-button-container"></div>
-            </div>
-        </div>
+        <div id="paypal-button-container"></div>
     </div>
 </div>
 
-<!-- PayPal SDK -->
 <script src="https://www.paypal.com/sdk/js?client-id={{ paypal_client_id }}&currency=USD"></script>
-
 <script>
-    // PayPal Buttons
     paypal.Buttons({
         createOrder: function (data, actions) {
-            return fetch("{{ url_for('create_paypal_order') }}", {
-                method: "POST"
-            }).then(function (res) {
-                return res.json();
-            }).then(function (orderData) {
-                return orderData.id;
-            });
+            return fetch("{{ url_for('create_paypal_order') }}", { method: "POST" })
+                .then(function (res) { return res.json(); })
+                .then(function (orderData) { return orderData.id; });
         },
         onApprove: function (data, actions) {
             return fetch("{{ url_for('capture_paypal_order') }}", {
                 method: "POST",
-                headers: {
-                    'content-type': 'application/json'
-                },
-                body: JSON.stringify({
-                    orderID: data.orderID
-                })
-            }).then(function (res) {
-                return res.json();
-            }).then(function (orderData) {
-                if (orderData.status === 'COMPLETED') {
-                    window.location.href = "{{ url_for('payment_success', success='true') }}";
-                } else {
-                    alert('Transaction failed or incomplete');
-                }
-            });
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ orderID: data.orderID })
+            })
+                .then(function (res) { return res.json(); })
+                .then(function (orderData) {
+                    if (orderData.status === 'COMPLETED') {
+                        window.location.href = "{{ url_for('payment_success', success='true') }}";
+                    } else {
+                        alert('The payment did not complete. Your card has not been charged.');
+                    }
+                });
         }
     }).render('#paypal-button-container');
 </script>
