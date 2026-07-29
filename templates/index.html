@@ -2,180 +2,170 @@
 {% from "_icons.html" import icon %}
 
 {% block title %}Convert a PDF — Excel Automation{% endblock %}
-{% block container_class %}container--mid{% endblock %}
-
-{% block content %}
+{% block body %}
 {% set limit_reached = not is_pro and conversion_count >= conversion_limit %}
 
-<div class="card upload-card stack" style="margin-top: var(--s4);">
-    <div class="page-head" style="text-align: center; margin-bottom: var(--s2);">
-        <h1 style="font-size: var(--fs-xl);">Convert a PDF</h1>
-        <p>Upload a bank statement, invoice, or receipt to get a structured Excel workbook.</p>
-    </div>
+<main class="auth-layout" style="background: var(--bg);">
+    <div class="auth-brand" style="align-items: flex-start; text-align: left; padding: var(--s6);">
+        <div style="margin-bottom: auto;">
+            {{ icon('sparkle', 48) }}
+            <h1 style="margin-top: var(--s4); margin-bottom: var(--s3); font-size: 2.5rem; line-height: 1.1;">Convert your<br>documents.</h1>
+            <p style="font-size: var(--fs-md); max-width: 400px; opacity: 0.9; margin-bottom: var(--s6);">
+                Select how you want your data extracted, then upload your bank statements, invoices, or receipts to get structured Excel workbooks.
+            </p>
 
-    <!-- Usage Banner -->
-    {% if not is_pro %}
-    <div class="usage-banner" style="background: var(--bg-2); border-radius: var(--radius-sm); padding: var(--s3); display: flex; align-items: center; justify-content: space-between; font-size: var(--fs-sm);">
-        <div style="display: flex; align-items: center; gap: var(--s2);">
-            {{ icon('info', 16) }}
-            <span><strong>Free Plan:</strong> {{ conversion_count }} / {{ conversion_limit }} conversions used. (First {{ free_page_limit }} pages only)</span>
-        </div>
-        <a href="{{ url_for('cart') }}" class="btn btn--secondary btn--sm">Upgrade</a>
-    </div>
-    {% endif %}
-
-    {% if limit_reached %}
-    <div class="alert alert-warning" role="status">
-        {{ icon('alert', 16) }}
-        <span>You have used all {{ conversion_limit }} free conversions. Upgrade to continue converting.</span>
-    </div>
-    {% endif %}
-
-    <!-- Upload -->
-    <form id="uploadForm" class="stack" action="{{ url_for('upload_file') }}" method="post"
-          enctype="multipart/form-data"
-          data-max-checks="{{ max_check_files }}">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-
-        <div class="file-input-container">
-            <input type="file" id="fileInput" name="file" accept=".pdf" required>
-            <label for="fileInput" class="file-input-label" style="min-height: 160px;">
-                {{ icon('upload', 32) }}
-                <span class="file-text" style="font-size: var(--fs-md); font-weight: 500;">Choose a PDF or drag it here</span>
-                <span class="file-size">PDF only</span>
-            </label>
-
-            {% if checks_enabled %}
-            <!-- Folder picker, shown only in checks mode. Browsers expose the
-                 relative path in JS only, so it is sent alongside as a field. -->
-            <input type="file" id="folderInput" webkitdirectory directory multiple hidden>
-            <div class="upload-extra" id="uploadExtra" hidden style="margin-top: var(--s3); text-align: center;">
-                <button type="button" class="btn btn--secondary" id="folderBtn">
-                    {{ icon('layers', 16) }} Upload a whole folder
-                </button>
-                <div class="field-hint" style="margin-top: var(--s1);">Keeps the company and month folders with each check.</div>
-            </div>
-            <div class="file-list" id="fileList" hidden></div>
-            {% endif %}
-        </div>
-
-        <fieldset style="border:0; padding-top: var(--s3);">
-            <legend class="field-label" style="text-align: center; width: 100%; margin-bottom: var(--s3);">
-                Conversion mode
-                <span class="field-hint" style="display: block; margin-top: 4px;">pick the one that matches your document</span>
-            </legend>
-
-            <div class="option-cards" style="grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));">
-                <label class="option-card {% if not is_pro %}pro-locked{% endif %}">
-                    <input type="radio" name="conversion_type" value="scanned" required
-                           {% if not is_pro %}disabled{% endif %}>
-                    <span class="card-content">
-                        {% if not is_pro %}<span class="pro-badge">Pro</span>{% endif %}
-                        {{ icon('camera', 19) }}
-                        <h4>Scanned</h4>
-                        <p>Photos/scans</p>
-                    </span>
-                </label>
-
-                <label class="option-card">
-                    <input type="radio" name="conversion_type" value="selectable" required>
-                    <span class="card-content">
-                        {{ icon('cursor', 19) }}
-                        <h4>Selectable</h4>
-                        <p>Digital text</p>
-                    </span>
-                </label>
-
-                <label class="option-card">
-                    <input type="radio" name="conversion_type" value="general" required>
-                    <span class="card-content">
-                        {{ icon('layers', 19) }}
-                        <h4>General</h4>
-                        <p>Auto-detect</p>
-                    </span>
-                </label>
-
-                <label class="option-card {% if not is_pro %}pro-locked{% endif %}">
-                    <input type="radio" name="conversion_type" value="custom" id="customRadio" required
-                           {% if not is_pro %}disabled{% endif %}>
-                    <span class="card-content">
-                        {% if not is_pro %}<span class="pro-badge">Pro</span>{% endif %}
-                        {{ icon('edit', 19) }}
-                        <h4>Custom</h4>
-                        <p>Own columns</p>
-                    </span>
-                </label>
-
-                {% if checks_enabled %}
-                <label class="option-card">
-                    <input type="radio" name="conversion_type" value="checks" id="checksRadio" required>
-                    <span class="card-content">
-                        {{ icon('receipt', 19) }}
-                        <h4>Checks</h4>
-                        <p>Check images</p>
-                    </span>
-                </label>
-                {% endif %}
-            </div>
-        </fieldset>
-
-        <!-- Custom instructions -->
-        <div id="customPromptSection" class="custom-prompt-section" hidden style="margin-top: var(--s3);">
-            <label class="field-label" for="customPrompt">
-                Extraction instructions
-                <span class="field-hint">— name the columns you want</span>
-            </label>
-
-            <textarea id="customPrompt" name="custom_prompt" rows="5"
-                      placeholder="Extract every transaction with columns: Date, Description, Amount, Category"></textarea>
-            <div class="char-counter"><span id="charCount">0</span> characters</div>
-
-            <div class="stack-sm">
-                <span class="field-hint">Start from a template:</span>
-                <div class="example-buttons">
-                    <button type="button" class="example-btn"
-                            data-prompt="Extract all financial transactions with columns: Date, Description, Amount, Category, Account">
-                        {{ icon('receipt', 14) }} Bank statement
-                    </button>
-                    <button type="button" class="example-btn"
-                            data-prompt="Convert this invoice with columns: Invoice #, Date, Customer, Item, Quantity, Unit Price, Total">
-                        {{ icon('file', 14) }} Invoice
-                    </button>
-                    <button type="button" class="example-btn"
-                            data-prompt="Extract employee data with columns: Name, Department, Salary, Start Date, Email">
-                        {{ icon('user', 14) }} Employee list
-                    </button>
+            <!-- Usage Banner -->
+            {% if not is_pro %}
+            <div style="background: rgba(0,0,0,0.15); border: 1px solid rgba(255,255,255,0.1); border-radius: var(--radius); padding: var(--s4); max-width: 400px;">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--s2);">
+                    <span style="font-weight: 600; font-size: var(--fs-sm);">Free Plan Usage</span>
+                    <span style="font-family: var(--mono); font-size: var(--fs-sm);">{{ conversion_count }} / {{ conversion_limit }}</span>
                 </div>
+                <div style="background: rgba(0,0,0,0.3); height: 4px; border-radius: 2px; margin-bottom: var(--s3); overflow: hidden;">
+                    {% set pct = (conversion_count / conversion_limit * 100) if conversion_limit > 0 else 0 %}
+                    <div style="background: var(--on-accent); height: 100%; width: {{ [pct, 100]|min }}%;"></div>
+                </div>
+                <p style="font-size: var(--fs-xs); opacity: 0.8; margin-bottom: var(--s3);">Reads first {{ free_page_limit }} pages.</p>
+                <a href="{{ url_for('cart') }}" class="btn btn--sm" style="background: white; color: var(--accent); border: none;">Upgrade to Pro</a>
             </div>
-        </div>
-
-        <button type="submit" class="btn btn--primary btn--lg btn--block" id="convertBtn"
-                style="margin-top: var(--s4);"
-                {% if limit_reached %}disabled{% endif %}>
-            {% if limit_reached %}
-            Free limit reached — upgrade to continue
-            {% else %}
-            {{ icon('sparkle', 17) }} Convert to Excel
             {% endif %}
-        </button>
 
-        <!-- Progress -->
-        <div id="processingMessage" class="processing-panel" aria-live="polite">
-            <div class="row">
-                <span class="spinner"></span>
-                <strong>Converting your document</strong>
-                <span class="spacer"></span>
-                <span class="progress-pct" id="mainProgressText">0%</span>
+            {% if limit_reached %}
+            <div style="background: #ef4444; color: white; border-radius: var(--radius); padding: var(--s3); max-width: 400px; margin-top: var(--s3); font-size: var(--fs-sm); display: flex; gap: var(--s2);">
+                {{ icon('alert', 16) }} Limit reached. Upgrade to continue.
             </div>
-            <div class="progress-track">
-                <div class="progress-fill" id="mainProgressBar"></div>
-            </div>
-            <div class="progress-meta">
-                <span id="mainSubStatusText">Starting…</span>
-                <span>Large files can take a few minutes</span>
-            </div>
+            {% endif %}
         </div>
-    </form>
-</div>
+    </div>
+    
+    <div class="auth-form-wrapper" style="align-items: flex-start; padding: var(--s6); overflow-y: auto;">
+        <div style="width: 100%; max-width: 600px; margin: 0 auto;">
+            
+            <form id="uploadForm" class="stack" action="{{ url_for('upload_file') }}" method="post"
+                  enctype="multipart/form-data"
+                  data-max-checks="{{ max_check_files }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
+                <!-- STEP 1: Conversion Mode (Now Above File Input) -->
+                <fieldset style="border:0; padding: 0;">
+                    <legend class="field-label" style="font-size: var(--fs-md); margin-bottom: var(--s4);">
+                        1. Select Conversion Mode
+                    </legend>
+
+                    <div class="option-cards" style="grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: var(--s2);">
+                        <label class="option-card {% if not is_pro %}pro-locked{% endif %}">
+                            <input type="radio" name="conversion_type" value="scanned" required {% if not is_pro %}disabled{% endif %}>
+                            <span class="card-content" style="padding: var(--s3) var(--s2); text-align: center;">
+                                {% if not is_pro %}<span class="pro-badge" style="top: 4px; right: 4px;">Pro</span>{% endif %}
+                                {{ icon('camera', 20) }}
+                                <h4 style="margin-top: 4px;">Scanned</h4>
+                            </span>
+                        </label>
+
+                        <label class="option-card">
+                            <input type="radio" name="conversion_type" value="selectable" required>
+                            <span class="card-content" style="padding: var(--s3) var(--s2); text-align: center;">
+                                {{ icon('cursor', 20) }}
+                                <h4 style="margin-top: 4px;">Selectable</h4>
+                            </span>
+                        </label>
+
+                        <label class="option-card">
+                            <input type="radio" name="conversion_type" value="general" required>
+                            <span class="card-content" style="padding: var(--s3) var(--s2); text-align: center;">
+                                {{ icon('layers', 20) }}
+                                <h4 style="margin-top: 4px;">General</h4>
+                            </span>
+                        </label>
+
+                        <label class="option-card {% if not is_pro %}pro-locked{% endif %}">
+                            <input type="radio" name="conversion_type" value="custom" id="customRadio" required {% if not is_pro %}disabled{% endif %}>
+                            <span class="card-content" style="padding: var(--s3) var(--s2); text-align: center;">
+                                {% if not is_pro %}<span class="pro-badge" style="top: 4px; right: 4px;">Pro</span>{% endif %}
+                                {{ icon('edit', 20) }}
+                                <h4 style="margin-top: 4px;">Custom</h4>
+                            </span>
+                        </label>
+
+                        {% if checks_enabled %}
+                        <label class="option-card">
+                            <input type="radio" name="conversion_type" value="checks" id="checksRadio" required>
+                            <span class="card-content" style="padding: var(--s3) var(--s2); text-align: center;">
+                                {{ icon('receipt', 20) }}
+                                <h4 style="margin-top: 4px;">Checks</h4>
+                            </span>
+                        </label>
+                        {% endif %}
+                    </div>
+                </fieldset>
+
+                <!-- Custom instructions (Hidden by default) -->
+                <div id="customPromptSection" class="custom-prompt-section" hidden style="background: var(--surface-2); padding: var(--s4); border-radius: var(--radius); margin-top: -1rem;">
+                    <label class="field-label" for="customPrompt">Extraction instructions</label>
+                    <textarea id="customPrompt" name="custom_prompt" rows="3"
+                              placeholder="e.g., Extract: Date, Description, Amount, Category" style="margin-bottom: var(--s2);"></textarea>
+                    
+                    <div class="stack-sm">
+                        <span class="field-hint">Templates:</span>
+                        <div class="example-buttons" style="display: flex; gap: var(--s2); flex-wrap: wrap;">
+                            <button type="button" class="btn btn--secondary btn--sm example-btn" data-prompt="Extract: Date, Description, Amount, Category, Account">Bank Statement</button>
+                            <button type="button" class="btn btn--secondary btn--sm example-btn" data-prompt="Extract: Invoice #, Date, Customer, Item, Quantity, Unit Price, Total">Invoice</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- STEP 2: File Upload -->
+                <div style="margin-top: var(--s4);">
+                    <label class="field-label" style="font-size: var(--fs-md); margin-bottom: var(--s4);">
+                        2. Upload Document
+                    </label>
+
+                    <div class="file-input-container">
+                        <input type="file" id="fileInput" name="file" accept=".pdf" required>
+                        <label for="fileInput" class="file-input-label" style="min-height: 200px; background: var(--surface-2); border-style: dashed;">
+                            {{ icon('upload', 40) }}
+                            <span class="file-text" style="font-size: var(--fs-md); font-weight: 500; margin-top: var(--s2);">Click or drag a PDF here</span>
+                        </label>
+
+                        {% if checks_enabled %}
+                        <input type="file" id="folderInput" webkitdirectory directory multiple hidden>
+                        <div class="upload-extra" id="uploadExtra" hidden style="margin-top: var(--s3);">
+                            <button type="button" class="btn btn--secondary" id="folderBtn">
+                                {{ icon('layers', 16) }} Upload a folder instead
+                            </button>
+                        </div>
+                        <div class="file-list" id="fileList" hidden></div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <button type="submit" class="btn btn--primary btn--lg btn--block" id="convertBtn"
+                        style="margin-top: var(--s5);"
+                        {% if limit_reached %}disabled{% endif %}>
+                    {% if limit_reached %}
+                    Free limit reached — Upgrade required
+                    {% else %}
+                    Convert to Excel {{ icon('arrow-right', 17) }}
+                    {% endif %}
+                </button>
+
+                <!-- Progress -->
+                <div id="processingMessage" class="processing-panel" aria-live="polite" style="margin-top: var(--s4);">
+                    <div class="row">
+                        <span class="spinner"></span>
+                        <strong>Converting document...</strong>
+                        <span class="spacer"></span>
+                        <span class="progress-pct" id="mainProgressText">0%</span>
+                    </div>
+                    <div class="progress-track">
+                        <div class="progress-fill" id="mainProgressBar"></div>
+                    </div>
+                    <div class="progress-meta">
+                        <span id="mainSubStatusText">Starting…</span>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+</main>
 {% endblock %}
