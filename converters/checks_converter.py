@@ -411,6 +411,49 @@ def extract_micr_check_number(micr_line):
 
 # ----------------------------------------------------------- validation
 
+def format_legal_amount(amount):
+    """
+    Convert a float amount to perfectly formatted check wording.
+    e.g. 574.25 -> Five Hundred Seventy-Four and 25/100
+    """
+    if amount is None:
+        return ""
+        
+    import math
+    
+    ones = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", 
+            "Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", 
+            "Seventeen", "Eighteen", "Nineteen"]
+    tens = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"]
+    
+    def convert_less_than_1000(n):
+        if n == 0:
+            return ""
+        elif n < 20:
+            return ones[n]
+        elif n < 100:
+            return tens[n // 10] + ("-" + ones[n % 10] if (n % 10 != 0) else "")
+        else:
+            return ones[n // 100] + " Hundred" + (" " + convert_less_than_1000(n % 100) if (n % 100 != 0) else "")
+            
+    dollars = int(math.floor(amount))
+    cents = int(round((amount - dollars) * 100))
+    
+    if dollars == 0:
+        dollar_words = "Zero"
+    elif dollars < 1000:
+        dollar_words = convert_less_than_1000(dollars)
+    elif dollars < 1000000:
+        dollar_words = convert_less_than_1000(dollars // 1000) + " Thousand"
+        rem = dollars % 1000
+        if rem != 0:
+            dollar_words += " " + convert_less_than_1000(rem)
+    else:
+        # Fallback for huge numbers
+        dollar_words = str(dollars)
+        
+    return f"{dollar_words} and {cents:02d}/100"
+
 def validate_checks(rows):
     """
     Run all validation rules on extracted check rows.
@@ -432,6 +475,12 @@ def validate_checks(rows):
                 flags.append(
                     f"Courtesy (${courtesy:,.2f}) ≠ legal (${legal_parsed:,.2f})"
                 )
+
+        # Generate perfectly worded legal amount
+        if courtesy is not None:
+            row["legal_amount"] = format_legal_amount(courtesy)
+        elif legal_parsed is not None:
+            row["legal_amount"] = format_legal_amount(legal_parsed)
 
         # 2. printed check_number ≠ MICR check number
         printed = str(row.get("check_number") or "").strip()
