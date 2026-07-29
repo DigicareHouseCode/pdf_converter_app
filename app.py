@@ -602,9 +602,10 @@ def run_conversion(task_id, user_id, original_filename, upload_path,
         try:
             log.info("[%s] %s mode, file=%s", task_id[:8], conversion_type, original_filename)
             if conversion_type == 'checks':
-                # Phase 2 replaces this with converters.checks_converter.
-                success, message, summary = False, (
-                    'Check extraction is not available yet.'), None
+                from converters.checks_converter import convert_checks
+                success, message, summary = convert_checks(
+                    upload_path, output_path, app.config['API_KEY'],
+                    progress_callback=progress)
             elif conversion_type == 'custom':
                 success, message, summary = convert_custom(
                     upload_path, output_path, app.config['API_KEY'], custom_prompt,
@@ -715,32 +716,44 @@ def get_rows(task_id):
     try:
         from openpyxl import load_workbook
         workbook = load_workbook(path, data_only=True)
-        if 'Transactions' not in workbook.sheetnames:
+
+        # Pick the data sheet: Checks first, then Transactions, then first.
+        sheet_name = None
+        for candidate in ('Checks', 'Transactions'):
+            if candidate in workbook.sheetnames:
+                sheet_name = candidate
+                break
+        if sheet_name is None:
             return jsonify({'editable': False, 'rows': [], 'columns': []})
 
-        sheet = workbook['Transactions']
+        sheet = workbook[sheet_name]
         rows = list(sheet.iter_rows(values_only=True))
         if not rows:
             return jsonify({'editable': True, 'rows': [], 'columns': []})
 
         headers = [str(h) if h is not None else '' for h in rows[0]]
+
+        # Separate data columns from the Review column
+        data_columns = [h for h in headers if h.lower() != 'review']
+
         payload = []
         for values in rows[1:]:
-            record = {headers[i]: values[i] for i in range(min(len(headers), len(values)))}
-            payload.append({
-                'Date': record.get('Date') or '',
-                'Description': record.get('Description') or '',
-                'Debit': record.get('Debit'),
-                'Credit': record.get('Credit'),
-                'Balance': record.get('Balance'),
-                'Review': record.get('Review') or '',
-            })
+            record = {}
+            for i in range(min(len(headers), len(values))):
+                record[headers[i]] = values[i]
+            # Build the response row with all data columns
+            row_data = {}
+            for col in data_columns:
+                row_data[col] = record.get(col) if record.get(col) is not None else ''
+            row_data['Review'] = record.get('Review') or ''
+            payload.append(row_data)
 
         return jsonify({
             'editable': True,
-            'columns': ['Date', 'Description', 'Debit', 'Credit', 'Balance'],
+            'columns': data_columns,
             'rows': payload,
             'flagged': task.flagged_count or 0,
+            'sheet_type': 'checks' if sheet_name == 'Checks' else 'transactions',
         })
     except Exception:
         log.exception("Could not read workbook for task %s", task_id)
@@ -750,43 +763,87 @@ def get_rows(task_id):
 @app.route('/api/rows/<task_id>', methods=['POST'])
 @login_required
 def save_rows(task_id):
-    """Rewrite the workbook from user-corrected rows and re-run reconciliation."""
+    """Rewrite the workbook from user-corrected rows and re-run validation."""
     task = owned_task_or_404(task_id)
     if task.status != 'completed' or not task.output_filename:
         abort(404)
 
     submitted = (request.json or {}).get('rows')
+    sheet_type = (request.json or {}).get('sheet_type', 'transactions')
     if not isinstance(submitted, list):
         return jsonify({'error': 'Expected a list of rows.'}), 400
     if len(submitted) > 20000:
         return jsonify({'error': 'That is more rows than we can save.'}), 400
 
-    from converters import common
-
-    rows = []
-    for index, item in enumerate(submitted):
-        if not isinstance(item, dict):
-            continue
-        rows.append({
-            'Date': common.as_text(item.get('Date'))[:64],
-            'Description': common.as_text(item.get('Description'))[:500],
-            'Debit': common.as_amount(item.get('Debit')),
-            'Credit': common.as_amount(item.get('Credit')),
-            'Balance': common.as_amount(item.get('Balance')),
-            '_page': 0,
-            '_row': index,
-            '_flags': [],
-        })
-
-    checked, flagged = common.reconcile(rows)
-    summary = common.summarise(rows, checked, flagged, 0)
-
     path = os.path.join(app.config['OUTPUT_FOLDER'], task.output_filename)
-    try:
-        common.write_workbook(rows, path, summary)
-    except Exception:
-        log.exception("Could not rewrite workbook for task %s", task_id)
-        return jsonify({'error': 'Could not save your changes.'}), 500
+
+    if sheet_type == 'checks':
+        from converters.checks_converter import (
+            CHECK_COLUMNS, validate_checks, write_checks_workbook,
+        )
+        from converters import common
+
+        rows = []
+        for index, item in enumerate(submitted):
+            if not isinstance(item, dict):
+                continue
+            row = {}
+            for col in CHECK_COLUMNS:
+                val = item.get(col, '')
+                if col == 'courtesy_amount':
+                    val = common.as_amount(val)
+                else:
+                    val = common.as_text(val) if not isinstance(val, (int, float)) else val
+                row[col] = val
+            row['_source_file'] = ''
+            row['_flags'] = []
+            rows.append(row)
+
+        checked, flagged = validate_checks(rows)
+        total_amount = sum(
+            r['courtesy_amount'] for r in rows
+            if isinstance(r.get('courtesy_amount'), (int, float))
+        )
+        summary = {
+            'rows': len(rows),
+            'total_amount': total_amount,
+            'flagged': flagged,
+            'failed_files': [],
+            'checked': checked,
+        }
+
+        try:
+            write_checks_workbook(rows, path, summary)
+        except Exception:
+            log.exception("Could not rewrite checks workbook for task %s", task_id)
+            return jsonify({'error': 'Could not save your changes.'}), 500
+
+    else:
+        from converters import common
+
+        rows = []
+        for index, item in enumerate(submitted):
+            if not isinstance(item, dict):
+                continue
+            rows.append({
+                'Date': common.as_text(item.get('Date'))[:64],
+                'Description': common.as_text(item.get('Description'))[:500],
+                'Debit': common.as_amount(item.get('Debit')),
+                'Credit': common.as_amount(item.get('Credit')),
+                'Balance': common.as_amount(item.get('Balance')),
+                '_page': 0,
+                '_row': index,
+                '_flags': [],
+            })
+
+        checked, flagged = common.reconcile(rows)
+        summary = common.summarise(rows, checked, flagged, 0)
+
+        try:
+            common.write_workbook(rows, path, summary)
+        except Exception:
+            log.exception("Could not rewrite workbook for task %s", task_id)
+            return jsonify({'error': 'Could not save your changes.'}), 500
 
     task.row_count = summary['rows']
     task.flagged_count = summary['flagged']

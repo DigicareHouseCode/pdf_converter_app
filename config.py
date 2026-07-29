@@ -67,7 +67,7 @@ class Config:
 
     # Checks mode. Off until the extractor ships, so the card is not offered
     # to users as a control that cannot yet do anything.
-    CHECKS_ENABLED = os.environ.get('CHECKS_ENABLED', 'false').lower() == 'true'
+    CHECKS_ENABLED = os.environ.get('CHECKS_ENABLED', 'true').lower() == 'true'
     # Upper bound on one batch: each check image is a separate vision call.
     MAX_CHECK_FILES = int(os.environ.get('MAX_CHECK_FILES', 300))
 

@@ -54,6 +54,7 @@
     if (reviewRoot) {
         (function () {
             var taskId = reviewRoot.dataset.taskId;
+            var thead = document.getElementById('reviewHead');
             var tbody = document.querySelector('#reviewTable tbody');
             var wrap = document.getElementById('tableWrap');
             var status = document.getElementById('reviewStatus');
@@ -61,6 +62,15 @@
             var saveState = document.getElementById('saveState');
             var root = window.APP_ROOT || '';
             var dirty = false;
+            var columns = [];      // data column names from the API
+            var sheetType = 'transactions';
+
+            // Column names that should be formatted/aligned as numbers
+            var MONEY_COLS = ['debit', 'credit', 'balance', 'amount', 'courtesy_amount'];
+
+            function isMoney(name) {
+                return MONEY_COLS.indexOf(name.toLowerCase()) !== -1;
+            }
 
             function money(v) {
                 if (v === null || v === undefined || v === '') return '';
@@ -86,6 +96,26 @@
                 return td;
             }
 
+            function buildHeader() {
+                thead.textContent = '';
+                // Row number
+                var th0 = document.createElement('th');
+                th0.className = 'col-n';
+                th0.textContent = '#';
+                thead.appendChild(th0);
+                // Data columns
+                columns.forEach(function (name) {
+                    var th = document.createElement('th');
+                    if (isMoney(name)) th.className = 'col-money';
+                    th.textContent = name;
+                    thead.appendChild(th);
+                });
+                // Review column
+                var thR = document.createElement('th');
+                thR.textContent = 'Review';
+                thead.appendChild(thR);
+            }
+
             function render(rows) {
                 tbody.textContent = '';
                 rows.forEach(function (row, i) {
@@ -97,11 +127,12 @@
                     n.textContent = i + 1;
                     tr.appendChild(n);
 
-                    tr.appendChild(cell(row.Date, '', tr));
-                    tr.appendChild(cell(row.Description, '', tr));
-                    tr.appendChild(cell(money(row.Debit), 'cell--num', tr));
-                    tr.appendChild(cell(money(row.Credit), 'cell--num', tr));
-                    tr.appendChild(cell(money(row.Balance), 'cell--num', tr));
+                    columns.forEach(function (colName) {
+                        var val = row[colName];
+                        var cls = isMoney(colName) ? 'cell--num' : '';
+                        if (isMoney(colName)) val = money(val);
+                        tr.appendChild(cell(val, cls, tr));
+                    });
 
                     var note = document.createElement('td');
                     note.className = 'cell--note';
@@ -115,13 +146,11 @@
             function collect() {
                 return Array.prototype.map.call(tbody.querySelectorAll('tr'), function (tr) {
                     var inputs = tr.querySelectorAll('input.cell');
-                    return {
-                        Date: inputs[0].value,
-                        Description: inputs[1].value,
-                        Debit: inputs[2].value,
-                        Credit: inputs[3].value,
-                        Balance: inputs[4].value
-                    };
+                    var obj = {};
+                    columns.forEach(function (colName, idx) {
+                        obj[colName] = inputs[idx] ? inputs[idx].value : '';
+                    });
+                    return obj;
                 });
             }
 
@@ -132,6 +161,9 @@
                         status.textContent = 'No rows to show for this conversion.';
                         return;
                     }
+                    columns = data.columns || [];
+                    sheetType = data.sheet_type || 'transactions';
+                    buildHeader();
                     render(data.rows);
                     status.hidden = true;
                     wrap.hidden = false;
@@ -148,7 +180,7 @@
                 fetch(root + '/api/rows/' + taskId, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken() },
-                    body: JSON.stringify({ rows: collect() })
+                    body: JSON.stringify({ rows: collect(), sheet_type: sheetType })
                 })
                     .then(function (r) { return r.json(); })
                     .then(function (data) {
@@ -156,7 +188,7 @@
                         dirty = false;
                         saveState.textContent = data.flagged
                             ? 'Saved — ' + data.flagged + ' row(s) still flagged'
-                            : 'Saved — balance reconciles';
+                            : 'Saved — all checks passed';
                         saveState.setAttribute('data-state', 'saved');
                         tbody.querySelectorAll('.row-dirty').forEach(function (tr) {
                             tr.classList.remove('row-dirty');
