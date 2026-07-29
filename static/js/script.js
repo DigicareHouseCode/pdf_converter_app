@@ -351,7 +351,15 @@
         var isCustom = mode === 'custom';
         var isChecks = mode === 'checks';
 
-        if (promptSection) promptSection.hidden = !isCustom;
+        if (promptSection) {
+            var label = document.getElementById('promptLabel');
+            if (label) {
+                label.textContent = 'Extraction instructions ' + (isCustom ? '(Required)' : '(Optional)');
+            }
+            if (promptField) {
+                promptField.required = isCustom;
+            }
+        }
         if (uploadExtra) uploadExtra.hidden = !isChecks;
 
         // Only checks mode takes a batch.
