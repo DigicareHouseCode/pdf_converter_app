@@ -452,7 +452,7 @@ def format_legal_amount(amount):
         # Fallback for huge numbers
         dollar_words = str(dollars)
         
-    return f"{dollar_words} and {cents:02d}/100"
+    return dollar_words
 
 def validate_checks(rows):
     """
@@ -539,7 +539,8 @@ def write_checks_workbook(rows, path, summary):
     flag_fill = PatternFill("solid", fgColor="FBECEC")
     money = "#,##0.00"
 
-    headers = CHECK_COLUMNS + ["Review"]
+    # Only include the first 6 columns (excluding micr_line and account_holder)
+    headers = CHECK_COLUMNS[:6]
     ws.append(headers)
     for col in range(1, len(headers) + 1):
         cell = ws.cell(row=1, column=col)
@@ -556,9 +557,6 @@ def write_checks_workbook(rows, path, summary):
             row.get("courtesy_amount"),
             row.get("legal_amount", ""),
             row.get("memo", ""),
-            row.get("micr_line", ""),
-            row.get("account_holder", ""),
-            note,
         ])
         idx = ws.max_row
         # Format courtesy_amount as money
@@ -567,12 +565,10 @@ def write_checks_workbook(rows, path, summary):
             for col in range(1, len(headers) + 1):
                 ws.cell(row=idx, column=col).fill = flag_fill
 
-    widths = [14, 13, 30, 15, 40, 20, 45, 30, 45]
+    widths = [14, 13, 30, 15, 40, 20]
     for pos, w in enumerate(widths, start=1):
         col_dim = ws.column_dimensions[get_column_letter(pos)]
         col_dim.width = w
-        if pos in (7, 8, 9):
-            col_dim.hidden = True
     ws.freeze_panes = "A2"
 
     # Summary sheet
