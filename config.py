@@ -61,7 +61,16 @@ class Config:
     ALLOWED_EXTENSIONS = {'pdf'}
     # Check images arrive as scans or bank exports, so accept the formats banks
     # actually emit. GIF is common for cheque images from older core systems.
-    ALLOWED_IMAGE_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'tif', 'tiff', 'webp'}
+    #
+    # The JPEG aliases matter more than they look: Windows and Chrome save
+    # JPEGs as .jfif, so a perfectly ordinary photo was being turned away.
+    # Every format here is one Pillow reads natively at the pinned version —
+    # HEIC is deliberately absent, as it needs the pillow-heif plugin, and
+    # rejecting it with a clear message beats accepting it and failing later.
+    ALLOWED_IMAGE_EXTENSIONS = {
+        'png', 'gif', 'tif', 'tiff', 'webp', 'bmp', 'avif',
+        'jpg', 'jpeg', 'jfif', 'jpe',
+    }
     CHECK_UPLOAD_EXTENSIONS = ALLOWED_EXTENSIONS | ALLOWED_IMAGE_EXTENSIONS
     # Every mode reads images as well as PDFs: a photographed or scanned
     # statement is the same extraction problem as a scanned PDF page.

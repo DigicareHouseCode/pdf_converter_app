@@ -175,7 +175,9 @@ def render_page(page):
 # `page.to_image(resolution).original`. Everything downstream — rendering,
 # vision extraction, the year hint — then works unchanged.
 
-IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".tif", ".tiff", ".webp"}
+# Derived from the upload allow-list rather than restated, so adding a
+# format in one place cannot leave the converter refusing to recognise it.
+IMAGE_EXTENSIONS = {"." + extension for extension in Config.ALLOWED_IMAGE_EXTENSIONS}
 
 
 def is_image_file(path):

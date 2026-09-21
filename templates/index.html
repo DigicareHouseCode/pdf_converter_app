@@ -146,16 +146,15 @@
                 </label>
 
                 <div class="file-input-container">
-                    <input type="file" id="fileInput" name="file"
-                        accept=".pdf,.png,.jpg,.jpeg,.gif,.tif,.tiff,.webp" required>
+                    <input type="file" id="fileInput" name="file" accept=".pdf,image/*" required>
                     <label for="fileInput" class="file-input-label"
                         style="min-height: 220px; background: var(--surface-2); border-style: dashed; border-width: 2px;">
                         {{ icon('upload', 40) }}
                         <span id="dropzoneText" class="file-text"
                             style="font-size: var(--fs-md); font-weight: 500; margin-top: var(--s2);">Choose a PDF or
                             image, or drag it here</span>
-                        <span id="dropzoneSubtext" class="file-size" style="margin-top: var(--s1);">PDF, PNG, JPG,
-                            GIF, TIFF or WEBP</span>
+                        <span id="dropzoneSubtext" class="file-size" style="margin-top: var(--s1);">PDF or image
+                            — PNG, JPG, JFIF, GIF, TIFF, BMP, WEBP</span>
                     </label>
 
                     {% if checks_enabled %}

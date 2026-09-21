@@ -235,7 +235,10 @@
     var folderFiles = [];
 
     // Every mode reads PDFs and images; checks mode additionally takes a batch.
-    var UPLOAD_ACCEPT = '.pdf,.png,.jpg,.jpeg,.gif,.tif,.tiff,.webp';
+    // 'image/*' rather than a list of extensions: Windows saves JPEGs as .jfif
+    // and an explicit list quietly greys those out in the file picker. The
+    // server is what actually decides, and it names any format it cannot read.
+    var UPLOAD_ACCEPT = '.pdf,image/*';
 
     function isChecksMode() {
         var selected = document.querySelector('input[name="conversion_type"]:checked');
@@ -254,7 +257,8 @@
         if (isChecksMode()) {
             setLabel('Choose check images or a PDF', 'PNG, JPG, GIF, TIFF or PDF — several at once', false);
         } else {
-            setLabel('Choose a PDF or image, or drag it here', 'PDF, PNG, JPG, GIF, TIFF or WEBP', false);
+            setLabel('Choose a PDF or image, or drag it here',
+                'PDF or image — PNG, JPG, JFIF, GIF, TIFF, BMP, WEBP', false);
         }
     }
 
@@ -321,7 +325,7 @@
         folderBtn.addEventListener('click', function () { folderInput.click(); });
         folderInput.addEventListener('change', function () {
             folderFiles = Array.prototype.slice.call(this.files).filter(function (f) {
-                return /\.(pdf|png|jpe?g|gif|tiff?|webp)$/i.test(f.name);
+                return /\.(pdf|png|jpe?g|jpe|jfif|gif|tiff?|webp|bmp|avif)$/i.test(f.name);
             });
             if (fileInput.value) fileInput.value = '';   // folder choice wins
             syncSelection();
@@ -381,7 +385,7 @@
         }
         if (ds) {
             ds.textContent = isChecks ? 'PNG, JPG, GIF, TIFF or PDF — several at once'
-                : 'PDF, PNG, JPG, GIF, TIFF or WEBP';
+                : 'PDF or image — PNG, JPG, JFIF, GIF, TIFF, BMP, WEBP';
         }
 
         if (!isChecks && folderFiles.length) {
