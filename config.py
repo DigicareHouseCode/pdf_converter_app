@@ -97,7 +97,12 @@ class Config:
     # Deterministic output. Extraction is a transcription task, not a creative
     # one, so there is no reason to sample.
     GEMINI_TEMPERATURE = float(os.environ.get('GEMINI_TEMPERATURE', 0.0))
-    GEMINI_MAX_OUTPUT_TOKENS = int(os.environ.get('GEMINI_MAX_OUTPUT_TOKENS', 8192))
+    # Must cover the model's own reasoning as well as the JSON it returns.
+    # gemini-2.5-pro is a thinking model: at 8192 it spent the entire budget
+    # reasoning about a dense statement page and returned no text at all
+    # (finish_reason=MAX_TOKENS), so every vision extraction yielded nothing.
+    # A full page of ~40 transactions measures ~9,600 tokens end to end.
+    GEMINI_MAX_OUTPUT_TOKENS = int(os.environ.get('GEMINI_MAX_OUTPUT_TOKENS', 32768))
 
     # Pages processed concurrently. Raise only if your Gemini quota allows.
     EXTRACTION_WORKERS = int(os.environ.get('EXTRACTION_WORKERS', 3))

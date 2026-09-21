@@ -137,14 +137,51 @@ class ModelUnavailable(RuntimeError):
     """The configured model name was rejected by the API."""
 
 
+# finish_reason as the API reports it. 2 (MAX_TOKENS) is the one worth naming:
+# it is not a transient fault and no amount of retrying clears it.
+_FINISH_MAX_TOKENS = 2
+
+
+def response_text(response):
+    """
+    Read a response's text without the `.text` quick accessor.
+
+    That accessor raises when a candidate came back with no text part, which
+    is precisely the case worth reporting rather than triggering. Returns
+    (text, finish_reason).
+    """
+    candidates = getattr(response, 'candidates', None) or []
+    if not candidates:
+        return "", None
+    candidate = candidates[0]
+    content = getattr(candidate, 'content', None)
+    parts = getattr(content, 'parts', None) or []
+    text = "".join(getattr(part, 'text', '') or '' for part in parts)
+    return text, getattr(candidate, 'finish_reason', None)
+
+
 def generate(model, parts, retries=3, timeout=300):
     """Call the model, retrying transient failures. Returns text or ''."""
     for attempt in range(1, retries + 1):
         try:
             response = model.generate_content(parts, request_options={"timeout": timeout})
-            if response and getattr(response, 'text', None):
-                return response.text
-            log.warning("Empty model response (attempt %s/%s)", attempt, retries)
+            text, finish_reason = response_text(response)
+            if text:
+                return text
+
+            if finish_reason == _FINISH_MAX_TOKENS:
+                # The budget went entirely on the model's own reasoning before
+                # it wrote any output. Temperature is 0, so a retry buys the
+                # identical result at the cost of another full call.
+                log.error(
+                    "Model exhausted GEMINI_MAX_OUTPUT_TOKENS (%s) before returning "
+                    "any text. Raise it; retrying cannot help.",
+                    Config.GEMINI_MAX_OUTPUT_TOKENS,
+                )
+                return ""
+
+            log.warning("Empty model response, finish_reason=%s (attempt %s/%s)",
+                        finish_reason, attempt, retries)
         except Exception as exc:
             message = str(exc)
             if "404" in message or "not found" in message.lower():
@@ -462,6 +499,45 @@ _DATE_FORMATS = (
 )
 _DATE_FORMATS_NO_YEAR = ("%m/%d", "%d/%m", "%b %d", "%d %b", "%m-%d")
 
+# The same formats, preferring day-first. Which list is used is decided per
+# document by _infer_day_first(), because "12-01-2026" is a valid date under
+# either reading and guessing wrong silently moves a transaction by months.
+_DATE_FORMATS_DAY_FIRST = (
+    "%d/%m/%Y", "%m/%d/%Y", "%Y-%m-%d", "%d-%m-%Y", "%m-%d-%Y",
+    "%d %b %Y", "%b %d %Y", "%d %B %Y", "%B %d %Y",
+    "%d/%m/%y", "%m/%d/%y",
+)
+_DATE_FORMATS_NO_YEAR_DAY_FIRST = ("%d/%m", "%m/%d", "%d %b", "%b %d", "%d-%m")
+
+_NUMERIC_DATE = re.compile(r"^\s*(\d{1,4})[/\-.](\d{1,2})[/\-.](\d{2,4})\s*$")
+
+
+def _infer_day_first(rows):
+    """
+    Decide whether this document writes numeric dates day-first or month-first.
+
+    One date on its own is ambiguous, but a statement rarely is: a single row
+    whose first component exceeds 12 settles the reading for every other row.
+    Ambiguous documents keep the month-first default.
+    """
+    day_first = month_first = 0
+
+    for row in rows:
+        match = _NUMERIC_DATE.match(row.get("Date") or "")
+        if not match or len(match.group(1)) == 4:  # 4 digits means Y-M-D already
+            continue
+        first, second = int(match.group(1)), int(match.group(2))
+        if first > 12 >= second:
+            day_first += 1
+        elif second > 12 >= first:
+            month_first += 1
+
+    if day_first or month_first:
+        log.info("Date order: %s (%d day-first vs %d month-first signals)",
+                 "day-first" if day_first > month_first else "month-first",
+                 day_first, month_first)
+    return day_first > month_first
+
 
 def statement_year(pdf):
     """Best guess at the statement's year, read from the first two pages."""
@@ -487,10 +563,20 @@ def resolve_dates(rows, year_hint=None):
 
     Where the year is absent, it is taken from `year_hint`. A month that goes
     backwards relative to its predecessor is treated as a year rollover.
+
+    Numeric dates are read day-first or month-first according to the document
+    as a whole — see _infer_day_first().
     """
     fallback = year_hint or datetime.now().year
     previous_month = None
     year = fallback
+
+    if _infer_day_first(rows):
+        formats = _DATE_FORMATS_DAY_FIRST
+        formats_no_year = _DATE_FORMATS_NO_YEAR_DAY_FIRST
+    else:
+        formats = _DATE_FORMATS
+        formats_no_year = _DATE_FORMATS_NO_YEAR
 
     for row in rows:
         raw = (row.get("Date") or "").strip()
@@ -499,7 +585,7 @@ def resolve_dates(rows, year_hint=None):
             continue
 
         parsed = None
-        for fmt in _DATE_FORMATS:
+        for fmt in formats:
             try:
                 parsed = datetime.strptime(raw, fmt)
                 break
@@ -507,7 +593,7 @@ def resolve_dates(rows, year_hint=None):
                 continue
 
         if parsed is None:
-            for fmt in _DATE_FORMATS_NO_YEAR:
+            for fmt in formats_no_year:
                 try:
                     partial = datetime.strptime(raw, fmt)
                 except ValueError:
