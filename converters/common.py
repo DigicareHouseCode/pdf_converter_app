@@ -20,8 +20,10 @@ Design notes worth knowing before editing:
 
 import json
 import logging
+import os
 import re
 import time
+from contextlib import contextmanager
 from datetime import datetime
 
 from config import Config
@@ -162,6 +164,108 @@ def generate(model, parts, retries=3, timeout=300):
 def render_page(page):
     """Rasterise a pdfplumber page at the configured resolution."""
     return page.to_image(resolution=Config.EXTRACTION_DPI).original
+
+
+# ------------------------------------------------------------- documents ---
+#
+# A conversion source is either a PDF or an image. Rather than branch on the
+# file type in every converter, an image is wrapped in objects that present the
+# small slice of the pdfplumber interface the pipeline actually uses:
+# `document.pages`, `page.extract_text()`, `page.extract_tables()` and
+# `page.to_image(resolution).original`. Everything downstream — rendering,
+# vision extraction, the year hint — then works unchanged.
+
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".tif", ".tiff", ".webp"}
+
+
+def is_image_file(path):
+    return os.path.splitext(str(path))[1].lower() in IMAGE_EXTENSIONS
+
+
+class _RenderedImage:
+    """Stands in for pdfplumber's PageImage, which exposes `.original`."""
+
+    def __init__(self, image):
+        self.original = image
+
+
+class ImagePage:
+    """One image presented as a page."""
+
+    def __init__(self, image, page_number):
+        self._image = image
+        self.page_number = page_number
+
+    def extract_text(self):
+        # An image has no text layer. Returning "" rather than raising is what
+        # makes the pipeline's text-layer pass fall through to vision.
+        return ""
+
+    def extract_tables(self, table_settings=None):
+        return []
+
+    def to_image(self, resolution=None):
+        # The image is already raster; `resolution` has nothing to act on.
+        return _RenderedImage(self._image)
+
+
+class ImageDocument:
+    """A pdfplumber-shaped wrapper around one image file."""
+
+    def __init__(self, pages):
+        self.pages = pages
+
+    def close(self):
+        for page in self.pages:
+            try:
+                page._image.close()
+            except Exception:
+                pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        self.close()
+        return False
+
+
+def load_image_pages(path):
+    """
+    Read an image file into one page per frame.
+
+    Multi-frame TIFFs are common for scanned multi-page documents, and a GIF
+    can carry several frames too, so every frame becomes a page. Frames are
+    converted to RGB because the Gemini API rejects palette-mode images.
+    """
+    from PIL import Image, ImageSequence
+
+    pages = []
+    with Image.open(path) as source:
+        for number, frame in enumerate(ImageSequence.Iterator(source), start=1):
+            pages.append(ImagePage(frame.convert("RGB"), number))
+    if not pages:
+        raise ValueError("The image file contains no readable frames.")
+    return pages
+
+
+@contextmanager
+def open_document(path):
+    """
+    Open a PDF or an image as a page-bearing document.
+
+    Used as a context manager so the caller closes either kind the same way.
+    """
+    if is_image_file(path):
+        document = ImageDocument(load_image_pages(path))
+        try:
+            yield document
+        finally:
+            document.close()
+    else:
+        import pdfplumber
+        with pdfplumber.open(path) as pdf:
+            yield pdf
 
 
 # ------------------------------------------------------------- coercion ----

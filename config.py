@@ -63,6 +63,9 @@ class Config:
     # actually emit. GIF is common for cheque images from older core systems.
     ALLOWED_IMAGE_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'tif', 'tiff', 'webp'}
     CHECK_UPLOAD_EXTENSIONS = ALLOWED_EXTENSIONS | ALLOWED_IMAGE_EXTENSIONS
+    # Every mode reads images as well as PDFs: a photographed or scanned
+    # statement is the same extraction problem as a scanned PDF page.
+    DOCUMENT_UPLOAD_EXTENSIONS = ALLOWED_EXTENSIONS | ALLOWED_IMAGE_EXTENSIONS
     MAX_CONTENT_LENGTH = None  # Removed file size limit as requested
 
     # Checks mode. Off until the extractor ships, so the card is not offered

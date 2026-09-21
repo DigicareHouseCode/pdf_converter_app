@@ -100,10 +100,30 @@ def file_extension(filename):
 
 
 def allowed_file(filename, conversion_type=None):
-    """Checks mode also accepts image formats; every other mode is PDF only."""
+    """Every mode accepts PDFs and image files."""
     permitted = (app.config['CHECK_UPLOAD_EXTENSIONS'] if conversion_type == 'checks'
-                 else app.config['ALLOWED_EXTENSIONS'])
+                 else app.config['DOCUMENT_UPLOAD_EXTENSIONS'])
     return file_extension(filename) in permitted
+
+
+def count_pages(path):
+    """
+    Number of pages in an uploaded document, or None when it cannot be read.
+
+    A PDF is counted with pdfplumber; an image counts its frames, so a
+    multi-page TIFF is charged for what it actually contains.
+    """
+    extension = file_extension(path)
+    try:
+        if extension in app.config['ALLOWED_IMAGE_EXTENSIONS']:
+            from PIL import Image
+            with Image.open(path) as image:
+                return getattr(image, 'n_frames', 1)
+        import pdfplumber
+        with pdfplumber.open(path) as pdf:
+            return len(pdf.pages)
+    except Exception:
+        return None
 
 
 def safe_relative_path(raw):
@@ -500,8 +520,8 @@ def upload_file():
 
     for item in uploaded:
         if not allowed_file(item.filename, conversion_type):
-            what = ('PDFs and image files' if conversion_type == 'checks' else 'PDF files')
-            return fail(f'{item.filename} is not supported. Only {what} can be converted.')
+            return fail(f'{item.filename} is not supported. '
+                        f'Only PDFs and image files can be converted.')
 
     ensure_directories()
 
@@ -542,25 +562,22 @@ def upload_file():
 
     else:
         file = uploaded[0]
-        original_filename = secure_filename(file.filename) or 'document.pdf'
+        original_filename = secure_filename(file.filename) or 'document'
         upload_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{file_id}_{original_filename}")
         output_filename = f"{file_id}_{os.path.splitext(original_filename)[0]}.xlsx"
         file.save(upload_path)
 
         if not current_user.is_pro:
-            try:
-                import pdfplumber
-                with pdfplumber.open(upload_path) as pdf:
-                    pages = len(pdf.pages)
-                if pages > max_pages:
-                    os.remove(upload_path)
-                    return fail(
-                        f'The free plan reads up to {max_pages} pages. This file has {pages}. '
-                        f'Upgrade for unlimited pages.'
-                    )
-            except Exception:
+            pages = count_pages(upload_path)
+            if pages is None:
                 log.warning("Could not count pages in %s; converter will apply the limit.",
                             original_filename)
+            elif pages > max_pages:
+                os.remove(upload_path)
+                return fail(
+                    f'The free plan reads up to {max_pages} pages. This file has {pages}. '
+                    f'Upgrade for unlimited pages.'
+                )
 
     output_path = os.path.join(app.config['OUTPUT_FOLDER'], output_filename)
 

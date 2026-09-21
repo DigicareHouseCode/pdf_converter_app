@@ -234,6 +234,9 @@
     // FileList cannot be merged with another one.
     var folderFiles = [];
 
+    // Every mode reads PDFs and images; checks mode additionally takes a batch.
+    var UPLOAD_ACCEPT = '.pdf,.png,.jpg,.jpeg,.gif,.tif,.tiff,.webp';
+
     function isChecksMode() {
         var selected = document.querySelector('input[name="conversion_type"]:checked');
         return !!selected && selected.value === 'checks';
@@ -251,7 +254,7 @@
         if (isChecksMode()) {
             setLabel('Choose check images or a PDF', 'PNG, JPG, GIF, TIFF or PDF — several at once', false);
         } else {
-            setLabel('Choose a PDF or drag it here', 'PDF only', false);
+            setLabel('Choose a PDF or image, or drag it here', 'PDF, PNG, JPG, GIF, TIFF or WEBP', false);
         }
     }
 
@@ -368,12 +371,18 @@
 
         // Only checks mode takes a batch.
         fileInput.multiple = isChecks;
-        fileInput.accept = isChecks ? '.pdf,.png,.jpg,.jpeg,.gif,.tif,.tiff,.webp' : '.pdf';
+        fileInput.accept = UPLOAD_ACCEPT;
 
         var dt = document.getElementById('dropzoneText');
         var ds = document.getElementById('dropzoneSubtext');
-        if (dt) dt.textContent = isChecks ? 'Choose check images or a PDF' : 'Choose a PDF or drag it here';
-        if (ds) ds.textContent = isChecks ? 'PNG, JPG, GIF, TIFF or PDF — several at once' : 'PDF only';
+        if (dt) {
+            dt.textContent = isChecks ? 'Choose check images or a PDF'
+                : 'Choose a PDF or image, or drag it here';
+        }
+        if (ds) {
+            ds.textContent = isChecks ? 'PNG, JPG, GIF, TIFF or PDF — several at once'
+                : 'PDF, PNG, JPG, GIF, TIFF or WEBP';
+        }
 
         if (!isChecks && folderFiles.length) {
             folderFiles = [];
@@ -425,7 +434,7 @@
         if (!files.length) {
             return showError(isChecksMode()
                 ? 'Choose the check images or PDF you want to read.'
-                : 'Choose a PDF file to convert.');
+                : 'Choose a PDF or image file to convert.');
         }
         if (isChecksMode() && files.length > maxChecks) {
             return showError('That is ' + files.length + ' files. Upload at most ' + maxChecks + ' at a time.');

@@ -6,8 +6,12 @@ Two extraction strategies live here:
 * text layer  — for PDFs that already contain their characters. pdfplumber
                 returns them exactly, so there is nothing for a vision model
                 to add and no OCR error to introduce.
-* vision      — for scans, and for digital pages whose table structure defeats
-                table detection.
+* vision      — for scans, for image uploads, and for digital pages whose
+                table structure defeats table detection.
+
+The source may be a PDF or an image file (PNG/JPG/GIF/TIFF/WEBP). Images have
+no text layer, so they go straight to vision; a multi-frame TIFF or GIF is read
+as one page per frame. `common.open_document` hides the difference.
 
 The `selectable` mode used to rasterise pages and OCR them even though the
 text was right there in the file. It now tries the text layer first and only
@@ -19,8 +23,6 @@ import os
 import re
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-
-import pdfplumber
 
 from config import Config
 from converters import common
@@ -214,16 +216,16 @@ def extract_page_vision(page, page_no, model, audit=True, prompt=None):
 
 # ------------------------------------------------------------------- run ----
 
-def _select_pages(pdf, max_pages):
+def _select_pages(document, max_pages):
     """Apply the plan page limit and the global cost ceiling."""
     limit = Config.MAX_PAGES_PER_CONVERSION
     if max_pages:
         limit = min(limit, max_pages)
-    pages = pdf.pages[:limit]
-    return pages, len(pdf.pages)
+    pages = document.pages[:limit]
+    return pages, len(document.pages)
 
 
-def convert(pdf_path, excel_path, api_key, mode="general",
+def convert(source_path, excel_path, api_key, mode="general",
             max_pages=None, progress_callback=None, prompt=None):
     """
     Run a conversion end to end.
@@ -236,10 +238,12 @@ def convert(pdf_path, excel_path, api_key, mode="general",
 
     Returns (success: bool, message: str, summary: dict | None).
     """
-    if not os.path.exists(pdf_path):
-        return False, f"File not found: {os.path.basename(pdf_path)}", None
+    if not os.path.exists(source_path):
+        return False, f"File not found: {os.path.basename(source_path)}", None
 
-    use_text_layer = mode in ("selectable", "general")
+    # An image has no text layer to try, so skip straight to vision rather
+    # than telling the user we are reading one.
+    use_text_layer = mode in ("selectable", "general") and not common.is_image_file(source_path)
     audit = mode in ("scanned", "general", "selectable")
     json_mode = True
 
@@ -256,13 +260,13 @@ def convert(pdf_path, excel_path, api_key, mode="general",
     lock = threading.Lock()
 
     try:
-        with pdfplumber.open(pdf_path) as pdf:
-            pages, total_in_file = _select_pages(pdf, max_pages)
+        with common.open_document(source_path) as document:
+            pages, total_in_file = _select_pages(document, max_pages)
             total = len(pages)
             if total == 0:
-                return False, "The PDF has no readable pages.", None
+                return False, "The document has no readable pages.", None
 
-            year_hint = common.statement_year(pdf)
+            year_hint = common.statement_year(document)
 
             # Pass 1: the text layer is free and exact, so always try it first.
             vision_needed = list(range(total))
@@ -322,8 +326,8 @@ def convert(pdf_path, excel_path, api_key, mode="general",
                                 log.error("Page task failed: %s", exc)
 
     except Exception as exc:
-        log.exception("PDF processing failed")
-        return False, f"Could not read the PDF: {exc}", None
+        log.exception("Document processing failed")
+        return False, f"Could not read the document: {exc}", None
 
     if not all_rows:
         return False, "No transactions could be read from this document.", None
@@ -350,14 +354,14 @@ def convert(pdf_path, excel_path, api_key, mode="general",
     return True, common.result_message(summary), summary
 
 
-def convert_custom(pdf_path, excel_path, api_key, user_prompt,
+def convert_custom(source_path, excel_path, api_key, user_prompt,
                    max_pages=None, progress_callback=None):
     """
     Custom mode: the user defines the columns, so there is no fixed schema to
     normalise against and no balance to reconcile. Rows are written as-is.
     """
-    if not os.path.exists(pdf_path):
-        return False, f"File not found: {os.path.basename(pdf_path)}", None
+    if not os.path.exists(source_path):
+        return False, f"File not found: {os.path.basename(source_path)}", None
     if not (user_prompt or "").strip():
         return False, "Describe what you want extracted.", None
 
@@ -378,11 +382,11 @@ def convert_custom(pdf_path, excel_path, api_key, user_prompt,
     lock = threading.Lock()
 
     try:
-        with pdfplumber.open(pdf_path) as pdf:
-            pages, _ = _select_pages(pdf, max_pages)
+        with common.open_document(source_path) as document:
+            pages, _ = _select_pages(document, max_pages)
             total = len(pages)
             if total == 0:
-                return False, "The PDF has no readable pages.", None
+                return False, "The document has no readable pages.", None
 
             done = [0]
 
@@ -408,7 +412,7 @@ def convert_custom(pdf_path, excel_path, api_key, user_prompt,
                         log.error("Custom page task failed: %s", exc)
     except Exception as exc:
         log.exception("Custom conversion failed")
-        return False, f"Could not read the PDF: {exc}", None
+        return False, f"Could not read the document: {exc}", None
 
     if not collected:
         return False, "Nothing matched those instructions in this document.", None

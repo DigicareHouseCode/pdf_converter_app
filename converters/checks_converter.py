@@ -39,7 +39,9 @@ CHECK_COLUMNS = [
     "legal_amount", "memo", "micr_line", "account_holder",
 ]
 
-IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".tif", ".tiff", ".webp"}
+# Shared with every other mode, which now reads images too. One copy, so
+# adding a format cannot reach checks but miss the rest.
+IMAGE_EXTENSIONS = common.IMAGE_EXTENSIONS
 PDF_EXTENSIONS = {".pdf"}
 ALL_EXTENSIONS = IMAGE_EXTENSIONS | PDF_EXTENSIONS
 
