@@ -52,6 +52,11 @@ STEP 2 — EXTRACT EVERY TRANSACTION ROW
   header to decide which of Debit/Credit it belongs to.
 - Never take a value from the Balance column and report it as Debit or Credit.
 - Transcribe only what is visible. Do not infer or complete missing values.
+- The balance column must follow from the row above it:
+      balance = previous balance - debit + credit
+  If your reading of a row breaks that, you have misread the row or slipped a
+  line. Re-read that row on the page. Never adjust a balance to make the
+  arithmetic work — correct the reading instead.
 
 STEP 3 — RETURN JSON
 Return ONLY a JSON array. No markdown, no commentary.
@@ -77,11 +82,47 @@ Check, in order:
 3. BALANCE BLEED — was any value taken from the Balance column and reported as
    a Debit or Credit? Correct it.
 4. TRANSCRIPTION — are the digits and descriptions right? Correct them.
+5. ARITHMETIC    — for every row, check that
+      balance = previous balance - debit + credit
+   A row that fails this means a line was slipped, duplicated or invented.
+   Re-read that part of the page and correct the reading. Do NOT invent a
+   balance to satisfy the arithmetic, and do NOT keep a row you cannot see
+   on the page.
+6. ALIGNMENT     — confirm each description still sits against the amounts
+   printed on its own line. A description shifted by one row is the most
+   common error in this task.
 
 EXTRACTED JSON:
 {payload}
 
 Return the COMPLETE corrected JSON array in the same shape. Raw JSON only.
+"""
+
+
+PROMPT_CONTROLS = """
+You are reading only the CONTROL FIGURES that a bank statement prints about
+itself — never the individual transactions.
+
+Look for a totals row under the transaction table and any summary box, with
+labels such as: Ending Balance, Closing Balance, Available Balance, Opening
+Balance, Brought Forward, Total Withdrawals, Total Deposits, Total Debits,
+Total Credits, No. of Transactions.
+
+Return ONLY this JSON object:
+{
+  "closing_balance": "",
+  "opening_balance": "",
+  "total_debits": "",
+  "total_credits": "",
+  "transaction_count": ""
+}
+
+RULES
+- Copy each figure exactly as printed. Strip currency symbols and separators.
+- Use an empty string for anything this page does not print.
+- Do NOT calculate, total, or infer anything. If a figure is not printed on
+  the page, it is an empty string. These values exist to check the extraction,
+  so a computed one is worse than none at all.
 """
 
 
@@ -660,10 +701,180 @@ def reconcile(rows):
     return checked, flagged
 
 
-def summarise(rows, checked, flagged, rejected_count=0):
+# ---------------------------------------------------- control verification ---
+#
+# reconcile() only proves the rows agree with each other. A model that slips a
+# line can invent a run of rows whose running balance is perfectly consistent
+# and still wrong — observed in practice: a fabricated row left every later
+# balance short by the same amount, and every internal check passed.
+#
+# The figures a statement prints about itself (closing balance, column totals,
+# transaction count) are outside that loop, so they are the only thing that
+# catches it. These helpers read them and compare.
+
+_CONTROL_PATTERNS = {
+    "closing_balance": r"(?:ending|closing|available)\s+balance",
+    "opening_balance": r"(?:opening|beginning)\s+balance|balance\s+(?:brought|carried)\s+forward",
+    "total_debits": r"total\s+(?:debits?|withdrawals?|payments?)",
+    "total_credits": r"total\s+(?:credits?|deposits?)",
+}
+
+_TRAILING_AMOUNT = re.compile(r"(-?[\d,]+\.\d{2}|\(-?[\d,]+\.\d{2}\))")
+_COUNT_LABEL = re.compile(r"(?:no\.?|number)\s+of\s+transactions?\D{0,10}(\d{1,6})", re.I)
+
+
+def controls_from_text(text):
+    """
+    Read a statement's printed control figures out of a text layer.
+
+    Free, so it is tried before spending a vision call. Returns only what the
+    page actually prints; anything absent stays None.
+    """
+    controls = {}
+    if not text:
+        return controls
+
+    for line in text.splitlines():
+        for key, label in _CONTROL_PATTERNS.items():
+            if key in controls:
+                continue
+            if re.search(label, line, re.I):
+                amounts = _TRAILING_AMOUNT.findall(line)
+                if amounts:
+                    value = as_amount(amounts[-1])
+                    if value is not None:
+                        controls[key] = value
+
+    match = _COUNT_LABEL.search(text)
+    if match:
+        controls["transaction_count"] = int(match.group(1))
+
+    return controls
+
+
+def parse_json_object(text):
+    """Parse a single JSON object from a model response. {} when unusable."""
+    if not text:
+        return {}
+    cleaned = text.strip()
+    cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", cleaned).strip()
+    try:
+        value = json.loads(cleaned)
+    except Exception:
+        match = re.search(r"\{.*\}", cleaned, re.S)
+        if not match:
+            return {}
+        try:
+            value = json.loads(match.group(0))
+        except Exception:
+            return {}
+    return value if isinstance(value, dict) else {}
+
+
+def normalise_controls(raw):
+    """Coerce a control-figure payload to floats, dropping blanks."""
+    controls = {}
+    if not isinstance(raw, dict):
+        return controls
+
+    for key in ("closing_balance", "opening_balance", "total_debits", "total_credits"):
+        value = as_amount(raw.get(key))
+        if value is not None:
+            controls[key] = value
+
+    count = as_text(raw.get("transaction_count"))
+    digits = re.sub(r"[^\d]", "", count)
+    if digits:
+        controls["transaction_count"] = int(digits)
+
+    return controls
+
+
+def closing_balance(rows):
+    """The last balance actually printed in the extracted rows."""
+    for row in reversed(rows):
+        if row.get("Balance") is not None:
+            return row["Balance"]
+    return None
+
+
+def verify_totals(rows, controls, whole_document=True):
+    """
+    Compare the extraction against the statement's own printed figures.
+
+    `whole_document` is False when only part of the file was read — a page
+    limit, or a single page uploaded out of a longer statement. Column totals
+    and the transaction count then describe more than was extracted, so they
+    are reported for information rather than judged as errors. The closing
+    balance is still compared: it belongs to the final row either way.
+    """
+    checks = []
+    if not controls:
+        return checks
+
+    # A statement can describe more than the file holds: one page of a longer
+    # statement still carries the whole statement's totals. The printed
+    # transaction count is the statement's own account of its scope, so when it
+    # exceeds what was extracted the column totals cannot be judged against it.
+    printed_count = controls.get("transaction_count")
+    if printed_count is not None and printed_count > len(rows):
+        if whole_document:
+            log.info("Statement reports %d transactions but %d were extracted — "
+                     "treating it as part of a longer statement.",
+                     printed_count, len(rows))
+        whole_document = False
+
+    def compare(label, printed, computed, decisive=True):
+        if printed is None or computed is None:
+            return
+        ok = abs(printed - computed) <= AMOUNT_TOLERANCE
+        checks.append({
+            "label": label,
+            "printed": printed,
+            "computed": computed,
+            "difference": computed - printed,
+            "ok": ok,
+            "decisive": decisive,
+        })
+
+    compare("Closing balance", controls.get("closing_balance"), closing_balance(rows))
+
+    debits = round(sum(r["Debit"] for r in rows if r.get("Debit")), 2)
+    credits = round(sum(r["Credit"] for r in rows if r.get("Credit")), 2)
+    compare("Total debits", controls.get("total_debits"), debits, decisive=whole_document)
+    compare("Total credits", controls.get("total_credits"), credits, decisive=whole_document)
+
+    if printed_count is not None:
+        checks.append({
+            "label": "Transaction count",
+            "printed": printed_count,
+            "computed": len(rows),
+            "difference": len(rows) - printed_count,
+            "ok": printed_count == len(rows),
+            "decisive": whole_document,
+        })
+
+    for check in checks:
+        if check["ok"]:
+            continue
+        # A partial document differing from its statement's totals is expected,
+        # not a fault, so it is not reported as one.
+        report = log.warning if check["decisive"] else log.info
+        report("Control %s — %s: statement prints %s, extraction gives %s",
+               "mismatch" if check["decisive"] else "difference (partial document)",
+               check["label"], check["printed"], check["computed"])
+
+    return checks
+
+
+def summarise(rows, checked, flagged, rejected_count=0, verification=None):
     """Totals for the summary sheet and the result page."""
     debits = sum(r["Debit"] for r in rows if r.get("Debit"))
     credits = sum(r["Credit"] for r in rows if r.get("Credit"))
+    verification = verification or []
+    # Only a decisive check can call an extraction wrong; a partial document
+    # legitimately totals less than the statement it came from.
+    mismatches = sum(1 for c in verification if not c["ok"] and c["decisive"])
     return {
         "rows": len(rows),
         "debits": debits,
@@ -672,6 +883,10 @@ def summarise(rows, checked, flagged, rejected_count=0):
         "checked": checked,
         "flagged": flagged,
         "rejected": rejected_count,
+        # Rows whose balance could not be chained to the row above.
+        "unverified": max(0, len(rows) - checked - 1),
+        "verification": verification,
+        "mismatches": mismatches,
     }
 
 
@@ -744,6 +959,7 @@ def write_workbook(rows, path, summary, sheet_name="Transactions"):
         ("Net movement", summary["net"], money),
         ("Balance checks performed", summary["checked"], None),
         ("Balance mismatches flagged", summary["flagged"], None),
+        ("Rows without a chained balance", summary.get("unverified", 0), None),
         ("Rows that could not be read", summary["rejected"], None),
     ]:
         report.append([label, value])
@@ -760,16 +976,74 @@ def write_workbook(rows, path, summary, sheet_name="Transactions"):
             "balance does not match the previous row."
         ])
 
+    # Checked against the statement's own printed figures. This is the section
+    # that matters: the rows above can agree with each other and still be wrong.
+    verification = summary.get("verification") or []
+    report.append([])
+    header_row = report.max_row + 1
+    report.append(["Checked against the statement", "Statement", "Extracted",
+                   "Difference", "Result"])
+    for column in range(1, 6):
+        cell = report.cell(row=header_row, column=column)
+        cell.font = header_font
+        cell.fill = header_fill
+
+    if verification:
+        for check in verification:
+            if check["ok"]:
+                verdict = "Matches"
+            elif check["decisive"]:
+                verdict = "DOES NOT MATCH"
+            else:
+                verdict = "Partial document — not comparable"
+            report.append([check["label"], check["printed"], check["computed"],
+                           check["difference"], verdict])
+            index = report.max_row
+            if check["label"] != "Transaction count":
+                for column in (2, 3, 4):
+                    report.cell(row=index, column=column).number_format = money
+            if not check["ok"]:
+                for column in range(1, 6):
+                    report.cell(row=index, column=column).fill = flag_fill
+    else:
+        report.append(["No totals were printed on this document, so the "
+                       "extraction could not be checked against it."])
+
+    for column, width in zip("CDE", (16, 16, 34)):
+        report.column_dimensions[column].width = width
+
+    if summary.get("mismatches"):
+        report.append([])
+        report.append([
+            "The extraction disagrees with the figures the statement prints "
+            "about itself. Treat these numbers as unverified and compare the "
+            "Transactions sheet against the original before using it."
+        ])
+
     workbook.save(path)
 
 
 def result_message(summary):
-    """One-line outcome for the UI."""
+    """
+    One-line outcome for the UI.
+
+    A passing internal check used to be reported as "running balance
+    reconciles", which reads as a guarantee. It is not one: the rows can agree
+    with each other and still disagree with the statement. Only a check
+    against the statement's own printed totals earns that wording.
+    """
     parts = [f"{summary['rows']} transactions extracted"]
-    if summary["flagged"]:
+
+    if summary.get("mismatches"):
+        parts.append(f"{summary['mismatches']} total(s) do not match the statement "
+                     f"— see the Summary sheet")
+    elif summary["flagged"]:
         parts.append(f"{summary['flagged']} flagged for review")
+    elif any(c["ok"] and c["decisive"] for c in summary.get("verification") or []):
+        parts.append("totals match the statement")
     elif summary["checked"]:
-        parts.append("running balance reconciles")
+        parts.append("running balance is internally consistent")
+
     if summary["rejected"]:
         parts.append(f"{summary['rejected']} rows unreadable")
     return ", ".join(parts) + "."

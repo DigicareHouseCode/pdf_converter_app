@@ -214,6 +214,51 @@ def extract_page_vision(page, page_no, model, audit=True, prompt=None):
     return rows, rejected
 
 
+# --------------------------------------------------------------- controls ---
+
+def extract_controls(pages, model=None):
+    """
+    Read the statement's printed control figures (closing balance, column
+    totals, transaction count).
+
+    Tried against the text layer first because that is free and exact. Only a
+    document with no text layer — an image or a scan — falls through to a
+    single vision call, made on the last pages because that is where a totals
+    row lives.
+    """
+    controls = {}
+
+    for page in reversed(pages[-3:]):
+        try:
+            text = page.extract_text() or ""
+        except Exception:
+            continue
+        found = common.controls_from_text(text)
+        for key, value in found.items():
+            controls.setdefault(key, value)
+
+    if controls or model is None:
+        if controls:
+            log.info("Control figures from text layer: %s", controls)
+        return controls
+
+    for page in reversed(pages[-2:]):
+        try:
+            image = common.render_page(page)
+        except Exception:
+            continue
+        found = common.normalise_controls(
+            common.parse_json_object(common.generate(model, [common.PROMPT_CONTROLS, image]))
+        )
+        for key, value in found.items():
+            controls.setdefault(key, value)
+        if controls:
+            break
+
+    log.info("Control figures from vision: %s", controls)
+    return controls
+
+
 # ------------------------------------------------------------------- run ----
 
 def _select_pages(document, max_pages):
@@ -258,6 +303,10 @@ def convert(source_path, excel_path, api_key, mode="general",
     rejected = []
     model = None
     lock = threading.Lock()
+    # Kept for the control-figure pass, which runs after extraction. Whether
+    # the whole file was read decides if its column totals are comparable.
+    controls = {}
+    whole_document = True
 
     try:
         with common.open_document(source_path) as document:
@@ -267,6 +316,7 @@ def convert(source_path, excel_path, api_key, mode="general",
                 return False, "The document has no readable pages.", None
 
             year_hint = common.statement_year(document)
+            whole_document = (total == total_in_file)
 
             # Pass 1: the text layer is free and exact, so always try it first.
             vision_needed = list(range(total))
@@ -325,6 +375,15 @@ def convert(source_path, excel_path, api_key, mode="general",
                             except Exception as exc:
                                 log.error("Page task failed: %s", exc)
 
+            # Must happen here: once the document closes its pages can no
+            # longer be read or rendered.
+            if all_rows:
+                report(92, "Checking the totals against the statement…")
+                try:
+                    controls = extract_controls(pages, model)
+                except Exception:
+                    log.exception("Control-figure extraction failed")
+
     except Exception as exc:
         log.exception("Document processing failed")
         return False, f"Could not read the document: {exc}", None
@@ -332,13 +391,15 @@ def convert(source_path, excel_path, api_key, mode="general",
     if not all_rows:
         return False, "No transactions could be read from this document.", None
 
-    report(92, "Checking the running balance…")
+    report(94, "Checking the running balance…")
 
     # Order first — the reconciliation below only means anything in statement order.
     rows = common.order_rows(all_rows)
     rows = common.resolve_dates(rows, year_hint)
     checked, flagged = common.reconcile(rows)
-    summary = common.summarise(rows, checked, flagged, len(rejected))
+    verification = common.verify_totals(rows, controls, whole_document=whole_document)
+
+    summary = common.summarise(rows, checked, flagged, len(rejected), verification)
 
     report(96, "Writing your workbook…")
     try:
