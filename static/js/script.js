@@ -229,6 +229,7 @@
     var uploadExtra = document.getElementById('uploadExtra');
     var fileList = document.getElementById('fileList');
     var maxChecks = parseInt(uploadForm.dataset.maxChecks || '300', 10);
+    var maxPages = parseInt(uploadForm.dataset.maxPages || '200', 10);
 
     // Files chosen via the folder picker, kept aside because a file input's
     // FileList cannot be merged with another one.
@@ -257,14 +258,16 @@
         if (isChecksMode()) {
             setLabel('Choose check images or a PDF', 'PNG, JPG, GIF, TIFF or PDF — several at once', false);
         } else {
-            setLabel('Choose a PDF or image, or drag it here',
-                'PDF or image — PNG, JPG, JFIF, GIF, TIFF, BMP, WEBP', false);
+            setLabel('Choose a PDF or images, or drag them here',
+                'PDF or image — select several pages to read them as one document', false);
         }
     }
 
     function chosenFiles() {
+        // Checks mode adds whatever came from the folder picker; the other
+        // modes keep every file chosen, in order, as the pages of one document.
         var picked = fileInput.files ? Array.prototype.slice.call(fileInput.files) : [];
-        return isChecksMode() ? picked.concat(folderFiles) : picked.slice(0, 1);
+        return isChecksMode() ? picked.concat(folderFiles) : picked;
     }
 
     function totalMB(files) {
@@ -274,7 +277,7 @@
 
     function renderFileList(files) {
         if (!fileList) return;
-        if (!isChecksMode() || files.length < 2) {
+        if (files.length < 2) {
             fileList.hidden = true;
             fileList.textContent = '';
             return;
@@ -304,8 +307,9 @@
             return;
         }
 
-        if (isChecksMode() && files.length > 1) {
-            setLabel(files.length + ' files selected', totalMB(files), true);
+        if (files.length > 1) {
+            setLabel(files.length + (isChecksMode() ? ' files selected' : ' pages selected'),
+                totalMB(files), true);
         } else {
             setLabel(files[0].name, (files[0].size / 1024 / 1024).toFixed(1) + ' MB', true);
         }
@@ -373,19 +377,20 @@
         }
         if (uploadExtra) uploadExtra.style.display = isChecks ? 'block' : 'none';
 
-        // Only checks mode takes a batch.
-        fileInput.multiple = isChecks;
+        // Checks mode takes a batch of separate cheques; the other modes take
+        // the pages of one document. Both accept several files.
+        fileInput.multiple = true;
         fileInput.accept = UPLOAD_ACCEPT;
 
         var dt = document.getElementById('dropzoneText');
         var ds = document.getElementById('dropzoneSubtext');
         if (dt) {
             dt.textContent = isChecks ? 'Choose check images or a PDF'
-                : 'Choose a PDF or image, or drag it here';
+                : 'Choose a PDF or images, or drag them here';
         }
         if (ds) {
             ds.textContent = isChecks ? 'PNG, JPG, GIF, TIFF or PDF — several at once'
-                : 'PDF or image — PNG, JPG, JFIF, GIF, TIFF, BMP, WEBP';
+                : 'PDF or image — select several pages to read them as one document';
         }
 
         if (!isChecks && folderFiles.length) {
@@ -442,6 +447,10 @@
         }
         if (isChecksMode() && files.length > maxChecks) {
             return showError('That is ' + files.length + ' files. Upload at most ' + maxChecks + ' at a time.');
+        }
+        if (!isChecksMode() && files.length > maxPages) {
+            return showError('That is ' + files.length + ' files. A document can be at most '
+                + maxPages + ' pages.');
         }
         if (selected.value === 'custom' && !promptField.value.trim()) {
             showError('Describe the columns you want extracted.');

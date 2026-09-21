@@ -104,6 +104,15 @@ class Config:
     # A full page of ~40 transactions measures ~9,600 tokens end to end.
     GEMINI_MAX_OUTPUT_TOKENS = int(os.environ.get('GEMINI_MAX_OUTPUT_TOKENS', 32768))
 
+    # When to spend a second model call re-reading a page.
+    #   on-failure — only pages whose balance chain or printed totals disagree
+    #                (default: the audit costs as much as the extraction, and
+    #                 a page that already reconciles has nothing to correct)
+    #   always     — every page; slower, but catches errors arithmetic cannot
+    #                see, such as a mistyped reference number
+    #   never      — fastest, no self-correction
+    AUDIT_MODE = os.environ.get('AUDIT_MODE', 'on-failure').strip().lower()
+
     # Pages processed concurrently. Raise only if your Gemini quota allows.
     EXTRACTION_WORKERS = int(os.environ.get('EXTRACTION_WORKERS', 3))
 

@@ -182,8 +182,8 @@ def extract_page_text_layer(page, page_no):
 
 # ----------------------------------------------------------------- vision ---
 
-def extract_page_vision(page, page_no, model, audit=True, prompt=None):
-    """Rasterise one page and read it with the model, then audit the result."""
+def extract_page_vision(page, page_no, model, prompt=None):
+    """Rasterise one page and read it with the model."""
     try:
         image = common.render_page(page)
     except Exception as exc:
@@ -194,24 +194,48 @@ def extract_page_vision(page, page_no, model, audit=True, prompt=None):
     text = common.generate(model, [prompt or common.PROMPT_TRANSACTIONS, image])
     items = common.parse_json_rows(text)
     rows = common.normalise_rows(items, page_no, rejected)
-
-    # Second pass: the model re-reads the page and corrects its own output.
-    # This used to run only on the mode that needed it least.
-    if audit and rows:
-        import json
-        payload = json.dumps(
-            [{k: v for k, v in row.items() if not k.startswith("_")} for row in rows],
-            indent=1, default=str,
-        )
-        audited_text = common.generate(model, [common.PROMPT_AUDIT.format(payload=payload), image])
-        audited_items = common.parse_json_rows(audited_text)
-        if audited_items:
-            audited_rows = common.normalise_rows(audited_items, page_no, rejected)
-            if audited_rows:
-                log.info("Page %s: audit %d -> %d rows", page_no, len(rows), len(audited_rows))
-                rows = audited_rows
-
     return rows, rejected
+
+
+def audit_page(page, page_no, rows, model):
+    """
+    Re-read one page with its own output in hand so the model can correct it.
+
+    A full model call, as expensive as the extraction itself — it used to run
+    on every page unconditionally, which doubled the time for every document
+    including the ones that were already right. The caller now decides, from
+    the balance chain and the statement's printed totals, which pages actually
+    need it.
+    """
+    if not rows:
+        return rows
+
+    try:
+        image = common.render_page(page)
+    except Exception as exc:
+        log.error("Page %s could not be rasterised for audit: %s", page_no, exc)
+        return rows
+
+    import json
+    payload = json.dumps(
+        [{k: v for k, v in row.items() if not k.startswith("_")} for row in rows],
+        indent=1, default=str,
+    )
+    audited_text = common.generate(model, [common.PROMPT_AUDIT.format(payload=payload), image])
+    audited_items = common.parse_json_rows(audited_text)
+    if audited_items:
+        audited_rows = common.normalise_rows(audited_items, page_no, [])
+        if audited_rows:
+            log.info("Page %s: audit %d -> %d rows", page_no, len(rows), len(audited_rows))
+            return audited_rows
+    return rows
+
+
+def _source_exists(source_path):
+    """An upload is a path, a directory of files, or a list of paths."""
+    if isinstance(source_path, (list, tuple)):
+        return bool(source_path) and all(os.path.exists(p) for p in source_path)
+    return os.path.exists(source_path)
 
 
 # --------------------------------------------------------------- controls ---
@@ -259,6 +283,53 @@ def extract_controls(pages, model=None):
     return controls
 
 
+# --------------------------------------------------------------- checking ---
+
+def _check(all_rows, year_hint, controls, whole_document):
+    """
+    Order, date and verify a set of rows.
+
+    Run once on the first reading and again after any audit, so the two can be
+    compared on the same terms.
+    """
+    rows = common.order_rows(list(all_rows))
+    rows = common.resolve_dates(rows, year_hint)
+    rows = common.drop_inert_rows(rows)
+    checked, flagged = common.reconcile(rows)
+    verification = common.verify_totals(rows, controls, whole_document=whole_document)
+    return rows, checked, flagged, verification
+
+
+def _score(flagged, verification):
+    """
+    How wrong a reading looks. Lower is better.
+
+    A total that disagrees with the statement outweighs any number of internal
+    balance breaks, because it is the check that cannot be satisfied by a
+    self-consistent invention.
+    """
+    mismatches = sum(1 for c in verification if not c["ok"] and c["decisive"])
+    return mismatches * 1000 + flagged
+
+
+def _pages_needing_audit(rows, verification, vision_pages, audit_mode):
+    """
+    Which pages to re-read.
+
+    A page earns an audit by failing its balance chain. If a printed total
+    disagrees the fault could be on any page, so all of them are re-read —
+    that is the case where the extra calls are worth their cost.
+    """
+    if audit_mode == "always":
+        return {index + 1 for index in vision_pages}
+
+    if any(not c["ok"] and c["decisive"] for c in verification):
+        return {index + 1 for index in vision_pages}
+
+    vision = {index + 1 for index in vision_pages}
+    return {row["_page"] for row in rows if row.get("_flags")} & vision
+
+
 # ------------------------------------------------------------------- run ----
 
 def _select_pages(document, max_pages):
@@ -277,19 +348,24 @@ def convert(source_path, excel_path, api_key, mode="general",
 
     mode:
       selectable — text layer first, vision per page only where it fails
-      scanned    — vision only, with the audit pass
+      scanned    — vision only
       general    — text layer first, vision fallback (same as selectable)
       custom     — vision with a user-supplied prompt, no audit
 
     Returns (success: bool, message: str, summary: dict | None).
     """
-    if not os.path.exists(source_path):
-        return False, f"File not found: {os.path.basename(source_path)}", None
+    if not _source_exists(source_path):
+        return False, "The uploaded file could not be found.", None
 
-    # An image has no text layer to try, so skip straight to vision rather
-    # than telling the user we are reading one.
-    use_text_layer = mode in ("selectable", "general") and not common.is_image_file(source_path)
-    audit = mode in ("scanned", "general", "selectable")
+    # Images have no text layer to try, so an all-image upload skips straight
+    # to vision rather than telling the user we are reading one. A mixed
+    # upload still tries it: the PDF pages have one and the image pages fall
+    # through to vision by themselves.
+    use_text_layer = mode in ("selectable", "general") and not common.all_images(source_path)
+    # "on-failure" (the default) re-reads only pages whose numbers do not check
+    # out. "always" re-reads every page, which is slower and catches errors no
+    # arithmetic can see, such as a mistyped reference number.
+    audit_mode = Config.AUDIT_MODE if mode in ("scanned", "general", "selectable") else "never"
     json_mode = True
 
     def report(percent, message):
@@ -353,7 +429,7 @@ def convert(source_path, excel_path, api_key, mode="general",
 
                     def work(index):
                         rows, page_rejected = extract_page_vision(
-                            pages[index], index + 1, model, audit=audit, prompt=prompt
+                            pages[index], index + 1, model, prompt=prompt
                         )
                         with lock:
                             all_rows.extend(rows)
@@ -364,8 +440,12 @@ def convert(source_path, excel_path, api_key, mode="general",
                                 f"Read page {done[0]} of {len(vision_needed)}",
                             )
 
-                    workers = max(1, min(Config.EXTRACTION_WORKERS, len(vision_needed)))
+                    # The control figures need only the page image, not the
+                    # extracted rows, so they are fetched alongside the pages
+                    # rather than after them — it costs no extra wall time.
+                    workers = max(1, min(Config.EXTRACTION_WORKERS, len(vision_needed) + 1))
                     with ThreadPoolExecutor(max_workers=workers) as pool:
+                        controls_future = pool.submit(extract_controls, pages, model)
                         futures = [pool.submit(work, i) for i in vision_needed]
                         for future in as_completed(futures):
                             try:
@@ -374,30 +454,60 @@ def convert(source_path, excel_path, api_key, mode="general",
                                 return False, str(exc), None
                             except Exception as exc:
                                 log.error("Page task failed: %s", exc)
+                        try:
+                            controls = controls_future.result() or {}
+                        except Exception:
+                            log.exception("Control-figure extraction failed")
 
-            # Must happen here: once the document closes its pages can no
-            # longer be read or rendered.
-            if all_rows:
-                report(92, "Checking the totals against the statement…")
+            # No model was needed, so the free text-layer read is all there is.
+            if not controls:
                 try:
-                    controls = extract_controls(pages, model)
+                    controls = extract_controls(pages, None)
                 except Exception:
                     log.exception("Control-figure extraction failed")
+
+            if not all_rows:
+                return False, "No transactions could be read from this document.", None
+
+            report(90, "Checking the running balance…")
+            rows, checked, flagged, verification = _check(
+                all_rows, year_hint, controls, whole_document)
+
+            # The audit is a second full model call per page. Running it on
+            # every page doubled the time for every document, including the
+            # ones that were already correct. Spend it only where the numbers
+            # say something is wrong.
+            if model is not None and audit_mode != "never":
+                suspect = _pages_needing_audit(rows, verification, vision_needed,
+                                               audit_mode)
+                if suspect:
+                    report(92, f"Re-reading {len(suspect)} page(s) that did not check out…")
+                    log.info("Auditing page(s) %s", sorted(suspect))
+                    kept = [r for r in all_rows if r.get("_page") not in suspect]
+                    audited = []
+                    for page_no in sorted(suspect):
+                        page_rows = [r for r in all_rows if r.get("_page") == page_no]
+                        audited.extend(
+                            audit_page(pages[page_no - 1], page_no, page_rows, model)
+                        )
+                    candidate_rows, candidate_checked, candidate_flagged, candidate_ver = _check(
+                        kept + audited, year_hint, controls, whole_document)
+
+                    # Keep the audit only if it actually improved matters. A
+                    # re-read that introduces more disagreement is worse than
+                    # the reading it replaced.
+                    if _score(candidate_flagged, candidate_ver) <= _score(flagged, verification):
+                        rows, checked, flagged, verification = (
+                            candidate_rows, candidate_checked,
+                            candidate_flagged, candidate_ver)
+                    else:
+                        log.info("Audit made the numbers worse; keeping the first reading.")
+                else:
+                    log.info("Every page checks out; skipping the audit pass.")
 
     except Exception as exc:
         log.exception("Document processing failed")
         return False, f"Could not read the document: {exc}", None
-
-    if not all_rows:
-        return False, "No transactions could be read from this document.", None
-
-    report(94, "Checking the running balance…")
-
-    # Order first — the reconciliation below only means anything in statement order.
-    rows = common.order_rows(all_rows)
-    rows = common.resolve_dates(rows, year_hint)
-    checked, flagged = common.reconcile(rows)
-    verification = common.verify_totals(rows, controls, whole_document=whole_document)
 
     summary = common.summarise(rows, checked, flagged, len(rejected), verification)
 
@@ -421,8 +531,8 @@ def convert_custom(source_path, excel_path, api_key, user_prompt,
     Custom mode: the user defines the columns, so there is no fixed schema to
     normalise against and no balance to reconcile. Rows are written as-is.
     """
-    if not os.path.exists(source_path):
-        return False, f"File not found: {os.path.basename(source_path)}", None
+    if not _source_exists(source_path):
+        return False, "The uploaded file could not be found.", None
     if not (user_prompt or "").strip():
         return False, "Describe what you want extracted.", None
 

@@ -50,7 +50,7 @@
     {% endif %}
 
     <form id="uploadForm" action="{{ url_for('upload_file') }}" method="post" enctype="multipart/form-data"
-        data-max-checks="{{ max_check_files }}">
+        data-max-checks="{{ max_check_files }}" data-max-pages="{{ max_pages_per_conversion }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
         <!-- STEP 1: Conversion Mode -->
@@ -146,21 +146,18 @@
                 </h2>
 
                 <div class="file-input-container">
-                    <input type="file" id="fileInput" name="file" accept=".pdf,image/*" required>
+                    <input type="file" id="fileInput" name="file" accept=".pdf,image/*" multiple required>
                     <label for="fileInput" class="file-input-label"
                         style="min-height: 220px; background: var(--surface-2); border-style: dashed; border-width: 2px;">
                         {{ icon('upload', 40) }}
                         <span id="dropzoneText" class="file-text"
                             style="font-size: var(--fs-md); font-weight: 500; margin-top: var(--s2);">Choose a PDF or
-                            image, or drag it here</span>
-                        <span id="dropzoneSubtext" class="file-size" style="margin-top: var(--s1);">PDF or image
-                            — PNG, JPG, JFIF, GIF, TIFF, BMP, WEBP</span>
+                            images, or drag them here</span>
+                        <span id="dropzoneSubtext" class="file-size" style="margin-top: var(--s1);">PDF or image —
+                            select several pages to read them as one document</span>
                     </label>
 
-                    {% if checks_enabled %}
-
                     <div class="file-list" id="fileList" hidden></div>
-                    {% endif %}
                 </div>
             </div>
 

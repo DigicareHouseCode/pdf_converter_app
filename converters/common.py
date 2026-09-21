@@ -23,7 +23,7 @@ import logging
 import os
 import re
 import time
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from datetime import datetime
 
 from config import Config
@@ -290,15 +290,27 @@ class ImagePage:
 
 
 class ImageDocument:
-    """A pdfplumber-shaped wrapper around one image file."""
+    """
+    A pdfplumber-shaped document assembled from pages of any origin.
+
+    Several uploaded images, a multi-frame TIFF and the pages of a PDF all
+    reduce to the same thing here: an ordered list of pages. That is what lets
+    a statement split across three photographs be read as one document without
+    the extraction, dating, reconciliation or verification code knowing.
+    """
 
     def __init__(self, pages):
         self.pages = pages
 
     def close(self):
+        # Only image pages own anything here; pdfplumber pages belong to the
+        # PDF that produced them and are closed with it.
         for page in self.pages:
+            image = getattr(page, "_image", None)
+            if image is None:
+                continue
             try:
-                page._image.close()
+                image.close()
             except Exception:
                 pass
 
@@ -329,23 +341,75 @@ def load_image_pages(path):
     return pages
 
 
+def resolve_sources(path):
+    """
+    Expand an upload into the ordered list of files that make it up.
+
+    A single file is itself. A directory is everything readable inside it, in
+    name order — which is why a multi-file upload is staged under names that
+    carry their position, so the order the user chose is the order read. A
+    list is taken as given.
+    """
+    if isinstance(path, (list, tuple)):
+        return [str(item) for item in path]
+
+    if os.path.isdir(path):
+        sources = []
+        for root, _, names in os.walk(path):
+            for name in sorted(names):
+                candidate = os.path.join(root, name)
+                if is_image_file(candidate) or candidate.lower().endswith(".pdf"):
+                    sources.append(candidate)
+        return sources
+
+    return [str(path)]
+
+
+def all_images(path):
+    """True when every source is an image, so there is no text layer to try."""
+    sources = resolve_sources(path)
+    return bool(sources) and all(is_image_file(source) for source in sources)
+
+
 @contextmanager
 def open_document(path):
     """
-    Open a PDF or an image as a page-bearing document.
+    Open one or many files as a single page-bearing document.
 
-    Used as a context manager so the caller closes either kind the same way.
+    Accepts a file, a directory of files, or a list of paths, and yields one
+    document whose pages run in source order. Images and PDFs can be mixed:
+    three photographed pages of a statement, or a PDF plus a photograph of the
+    page that scanned badly, read as one statement with one running balance.
     """
-    if is_image_file(path):
-        document = ImageDocument(load_image_pages(path))
-        try:
-            yield document
-        finally:
-            document.close()
-    else:
+    sources = resolve_sources(path)
+    if not sources:
+        raise ValueError("There are no readable files in this upload.")
+
+    # One PDF is the common case and stays exactly as it was.
+    if len(sources) == 1 and not is_image_file(sources[0]):
         import pdfplumber
-        with pdfplumber.open(path) as pdf:
+        with pdfplumber.open(sources[0]) as pdf:
             yield pdf
+        return
+
+    with ExitStack() as stack:
+        pages = []
+        for source in sources:
+            if is_image_file(source):
+                pages.extend(load_image_pages(source))
+            else:
+                # Imported only when a PDF is actually present: an all-image
+                # upload has no reason to need it.
+                import pdfplumber
+                pdf = stack.enter_context(pdfplumber.open(source))
+                pages.extend(pdf.pages)
+
+        document = ImageDocument(pages)
+        stack.callback(document.close)
+        if len(sources) > 1:
+            log.info("Reading %d files as one document: %d pages total",
+                     len(sources), len(pages))
+        yield document
 
 
 # ------------------------------------------------------------- coercion ----
@@ -659,6 +723,43 @@ def order_rows(rows):
 
 
 # ---------------------------------------------------------- reconciliation ---
+
+def drop_inert_rows(rows):
+    """
+    Remove rows that move no money and leave the balance where it was.
+
+    A model re-emitting a line it has already reported shows up exactly like
+    this: same balance as the row above, nothing in either amount column. Such
+    a row cannot be a transaction — a transaction either moves money or
+    changes the balance — so dropping it loses nothing and stops a duplicate
+    inflating the row count.
+
+    A row with no balance at all is kept: that one is merely incomplete, and
+    an incomplete row is the caller's to see.
+    """
+    kept = []
+    previous_balance = None
+
+    for row in rows:
+        balance = row.get("Balance")
+        inert = (
+            not row.get("Debit")
+            and not row.get("Credit")
+            and balance is not None
+            and previous_balance is not None
+            and abs(balance - previous_balance) <= AMOUNT_TOLERANCE
+        )
+        if inert:
+            log.info("Dropped a row that moves no money and leaves the balance at "
+                     "%.2f: %s", balance, (row.get("Description") or "")[:60])
+            continue
+
+        kept.append(row)
+        if balance is not None:
+            previous_balance = balance
+
+    return kept
+
 
 def reconcile(rows):
     """

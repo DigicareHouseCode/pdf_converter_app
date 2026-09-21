@@ -1,5 +1,6 @@
 import logging
 import os
+import shutil
 import threading
 import time
 import uuid
@@ -106,16 +107,28 @@ def allowed_file(filename, conversion_type=None):
     return file_extension(filename) in permitted
 
 
-def count_pages(path):
+def safe_upload_name(filename):
     """
-    Number of pages in an uploaded document, or None when it cannot be read.
+    A filename safe to write to disk, with its extension intact.
 
-    A PDF is counted with pdfplumber; an image counts its frames, so a
-    multi-page TIFF is charged for what it actually contains.
+    The extension decides how the converter reads the file, and
+    secure_filename() reduces a wholly non-ASCII name to an empty string,
+    extension included — so the extension is taken from the browser's name
+    before sanitising and put back afterwards.
     """
-    extension = file_extension(path)
+    extension = file_extension(filename)
+    name = secure_filename(filename)
+    if not name:
+        return f'document.{extension}' if extension else 'document'
+    if extension and file_extension(name) != extension:
+        return f'{name}.{extension}'
+    return name
+
+
+def _count_one(path):
+    """Pages in a single file, or None when it cannot be read."""
     try:
-        if extension in app.config['ALLOWED_IMAGE_EXTENSIONS']:
+        if file_extension(path) in app.config['ALLOWED_IMAGE_EXTENSIONS']:
             from PIL import Image
             with Image.open(path) as image:
                 return getattr(image, 'n_frames', 1)
@@ -124,6 +137,38 @@ def count_pages(path):
             return len(pdf.pages)
     except Exception:
         return None
+
+
+def count_pages(path):
+    """
+    Number of pages in an upload, or None when it cannot be read.
+
+    A PDF is counted with pdfplumber; an image counts its frames, so a
+    multi-page TIFF is charged for what it actually contains. A directory is
+    the sum of its files — several photographed pages are several pages.
+    """
+    if not os.path.isdir(path):
+        return _count_one(path)
+
+    total = 0
+    for root, _, names in os.walk(path):
+        for name in sorted(names):
+            count = _count_one(os.path.join(root, name))
+            if count is None:
+                return None
+            total += count
+    return total or None
+
+
+def discard_upload(path):
+    """Delete a staged upload, whether it is one file or a directory."""
+    try:
+        if os.path.isdir(path):
+            shutil.rmtree(path, ignore_errors=True)
+        elif os.path.exists(path):
+            os.remove(path)
+    except Exception:
+        log.warning("Could not remove staged upload %s", path)
 
 
 def safe_relative_path(raw):
@@ -200,6 +245,7 @@ def dashboard():
         free_page_limit=app.config.get('FREE_PAGE_LIMIT', 5),
         checks_enabled=app.config.get('CHECKS_ENABLED', False),
         max_check_files=app.config.get('MAX_CHECK_FILES', 300),
+        max_pages_per_conversion=app.config.get('MAX_PAGES_PER_CONVERSION', 200),
         is_pro=current_user.is_pro,
         pro_expiry=current_user.pro_expiry,
     )
@@ -509,7 +555,9 @@ def upload_file():
     if conversion_type == 'custom' and not custom_prompt:
         return fail('Describe what you want extracted.')
 
-    # Checks mode takes a batch; every other mode takes one file.
+    # Checks mode takes a batch of separate cheques. Every other mode takes
+    # the pages of ONE document, which may still arrive as several files —
+    # a statement photographed a page at a time.
     uploaded = [f for f in request.files.getlist('file') if f and f.filename]
     if not uploaded:
         return fail('Choose a file to convert.')
@@ -519,7 +567,10 @@ def upload_file():
         if len(uploaded) > limit:
             return fail(f'That is {len(uploaded)} files. Please upload at most {limit} at a time.')
     else:
-        uploaded = uploaded[:1]
+        limit = app.config.get('MAX_PAGES_PER_CONVERSION', 200)
+        if len(uploaded) > limit:
+            return fail(f'That is {len(uploaded)} files. Please upload at most {limit} pages '
+                        f'as one document.')
 
     for item in uploaded:
         if not allowed_file(item.filename, conversion_type):
@@ -564,31 +615,43 @@ def upload_file():
         log.info("Checks batch %s: %d file(s) staged", file_id[:8], saved)
 
     else:
-        file = uploaded[0]
-        # The extension decides how the converter reads the file, so take it
-        # from the browser's name before sanitising: secure_filename() reduces
-        # a wholly non-ASCII name to an empty string, extension included.
-        extension = file_extension(file.filename)
-        original_filename = secure_filename(file.filename)
-        if not original_filename:
-            original_filename = f'document.{extension}' if extension else 'document'
-        elif extension and file_extension(original_filename) != extension:
-            original_filename = f'{original_filename}.{extension}'
-        upload_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{file_id}_{original_filename}")
-        output_filename = f"{file_id}_{os.path.splitext(original_filename)[0]}.xlsx"
-        file.save(upload_path)
+        names = [safe_upload_name(item.filename) for item in uploaded]
+        first_stem = os.path.splitext(names[0])[0]
 
-        if not current_user.is_pro:
-            pages = count_pages(upload_path)
-            if pages is None:
-                log.warning("Could not count pages in %s; converter will apply the limit.",
-                            original_filename)
-            elif pages > max_pages:
-                os.remove(upload_path)
-                return fail(
-                    f'The free plan reads up to {max_pages} pages. This file has {pages}. '
-                    f'Upgrade for unlimited pages.'
-                )
+        if len(uploaded) == 1:
+            original_filename = names[0]
+            upload_path = os.path.join(app.config['UPLOAD_FOLDER'],
+                                       f"{file_id}_{original_filename}")
+            uploaded[0].save(upload_path)
+        else:
+            # Staged in a directory of their own, each name prefixed with its
+            # position, because the converter reads a directory in name order
+            # and page order is what makes the running balance mean anything.
+            original_filename = f"{len(uploaded)} pages"
+            upload_path = os.path.join(app.config['UPLOAD_FOLDER'], file_id)
+            os.makedirs(upload_path, exist_ok=True)
+            for position, (item, name) in enumerate(zip(uploaded, names)):
+                item.save(os.path.join(upload_path, f"{position:04d}_{name}"))
+            log.info("Upload %s: %d files staged as one document", file_id[:8], len(uploaded))
+
+        output_filename = f"{file_id}_{first_stem}.xlsx"
+
+        pages = count_pages(upload_path)
+        if pages is None:
+            log.warning("Could not count pages in %s; converter will apply the limit.",
+                        original_filename)
+        elif pages > app.config.get('MAX_PAGES_PER_CONVERSION', 200):
+            discard_upload(upload_path)
+            return fail(
+                f"That is {pages} pages. This converter reads up to "
+                f"{app.config.get('MAX_PAGES_PER_CONVERSION', 200)} in one document."
+            )
+        elif not current_user.is_pro and pages > max_pages:
+            discard_upload(upload_path)
+            return fail(
+                f'The free plan reads up to {max_pages} pages. This upload has {pages}. '
+                f'Upgrade for unlimited pages.'
+            )
 
     output_path = os.path.join(app.config['OUTPUT_FOLDER'], output_filename)
 
