@@ -479,6 +479,9 @@ def upload_file():
         return redirect(url_for('dashboard'))
 
     def fail(message):
+        # Logged because the browser only shows this to the user; without it a
+        # 400 in the console has no matching reason anywhere on the server.
+        log.info("Upload rejected (user %s): %s", current_user.id, message)
         if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
             return jsonify({'error': message}), 400
         flash(message, 'error')
@@ -506,7 +509,7 @@ def upload_file():
     if conversion_type == 'custom' and not custom_prompt:
         return fail('Describe what you want extracted.')
 
-    # Checks mode takes a batch; every other mode takes one PDF.
+    # Checks mode takes a batch; every other mode takes one file.
     uploaded = [f for f in request.files.getlist('file') if f and f.filename]
     if not uploaded:
         return fail('Choose a file to convert.')
@@ -562,7 +565,15 @@ def upload_file():
 
     else:
         file = uploaded[0]
-        original_filename = secure_filename(file.filename) or 'document'
+        # The extension decides how the converter reads the file, so take it
+        # from the browser's name before sanitising: secure_filename() reduces
+        # a wholly non-ASCII name to an empty string, extension included.
+        extension = file_extension(file.filename)
+        original_filename = secure_filename(file.filename)
+        if not original_filename:
+            original_filename = f'document.{extension}' if extension else 'document'
+        elif extension and file_extension(original_filename) != extension:
+            original_filename = f'{original_filename}.{extension}'
         upload_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{file_id}_{original_filename}")
         output_filename = f"{file_id}_{os.path.splitext(original_filename)[0]}.xlsx"
         file.save(upload_path)
